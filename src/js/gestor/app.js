@@ -63,6 +63,14 @@ const urlApp = (cid) => { const u = new URL('../cliente/', location.href); u.sea
 const verApp = (cid, cls = 'btn ghost sm') => `<a class="${cls}" target="_blank" rel="noopener" href="${urlApp(cid)}" title="Ver o app do parceiro como ele vê">${icon('link')} Ver app</a>`;
 const pageHead = (title, sub = '', actions = '') => `<div class="pagehead"><div><h1>${title}</h1>${sub ? `<div class="sub">${sub}</div>` : ''}</div><div class="row wrap">${actions}</div></div>`;
 
+// Cadastro dentro de outra ação: guarda o que já foi digitado, abre o cadastro e volta
+const lerForm = (id) => { const f = document.getElementById(id); return f ? Object.fromEntries([...f.elements].filter((e) => e.name).map((e) => [e.name, e.value])) : {}; };
+const aplicarForm = (id, snap = {}) => { const f = document.getElementById(id); if (!f) return; for (const e of f.elements) if (e.name && snap[e.name] !== undefined && e.type !== 'hidden' && !e.dataset.onchange?.startsWith('cli')) e.value = snap[e.name]; };
+function novoParceiro(onSalvo, onCancelar) {
+  modal({ title: 'Novo parceiro', wide: true, body: formCliente() + (onCancelar ? '<div class="tiny muted mt-s">Ao salvar, você volta para onde estava.</div>' : ''),
+    handlers: { salvarCliente: (f) => common.salvarCliente(f, onSalvo), novoCodigo: (el) => common.novoCodigo(el), close: () => { closeModal(); onCancelar?.(); } } });
+}
+
 // Garrafas em consignação por parceiro (clique abre o detalhamento editável)
 function graficoParceiros(s) {
   const cons = D.consignado(s);
@@ -259,7 +267,7 @@ function vEstoque({ query }) {
   `);
 }
 
-function modalMov(tipo) {
+function modalMov(tipo, snap = {}, onSalvo) {
   const s = S();
   const est = D.estoqueCentral(s);
   const titulo = { entrada: 'Entrada no estoque', venda_direta: 'Venda direta', ajuste: 'Ajuste de inventário', perda: 'Perda / quebra' }[tipo];
@@ -268,6 +276,7 @@ function modalMov(tipo) {
       <div class="grid g2"><label class="field"><span>Data</span><input class="input" type="date" name="data" value="${today()}"></label>
       <label class="field"><span>${tipo === 'entrada' ? 'Documento / importação' : 'Observação'}</span><input class="input" name="obs" placeholder="${tipo === 'entrada' ? 'Ex.: Importação Dieci Terre #3' : ''}"></label></div>
       ${tipo === 'ajuste' ? `<div class="seg"><button type="button" class="on" data-act="sinal" data-v="1">Adicionar</button><button type="button" data-act="sinal" data-v="-1">Remover</button></div><input type="hidden" name="sinal" value="1">` : ''}
+      ${tipo === 'entrada' ? `<div class="row between"><span class="small muted">Informe a quantidade de cada rótulo recebido.</span><button type="button" class="btn ghost sm" data-act="novoRotuloMov">${icon('plus')} Cadastrar novo rótulo</button></div>` : ''}
       <div class="card pad-0"><div class="list" style="padding:0 14px">${s.produtos.filter((p) => p.ativo).map((p) => `<div class="li">${thumb(p, 'sm')}<div class="grow"><div class="t">${esc(p.nome)}</div><div class="s">Saldo ${est[p.id]}${tipo === 'entrada' ? '' : tipo === 'venda_direta' ? ` · tabela ${money(p.preco)}` : ''}</div></div>
         ${tipo === 'entrada' ? moneyInput('custo:' + p.id, p.custo, { width: 120, extra: 'title="Custo unitário"' }) : ''}
         ${tipo === 'venda_direta' ? moneyInput('preco:' + p.id, p.preco * 1.25, { width: 120, extra: 'title="Preço unitário"' }) : ''}
@@ -279,6 +288,7 @@ function modalMov(tipo) {
     handlers: {
       step: stepHandler,
       sinal: (el) => { el.parentElement.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b === el)); document.querySelector('[name=sinal]').value = el.dataset.v; },
+      novoRotuloMov: () => { const sn = lerForm('fmov'); closeModal(); modalProduto(null, () => modalMov(tipo, sn, onSalvo), () => modalMov(tipo, sn, onSalvo)); },
       salvarMov: () => {
         const fd = new FormData(document.getElementById('fmov'));
         const itens = s.produtos.map((p) => ({ p, q: +fd.get('q:' + p.id) || 0 })).filter((x) => x.q > 0);
@@ -299,9 +309,11 @@ function modalMov(tipo) {
           if (tipo === 'entrada' && fd.get('despesa')) st.despesas.push({ id: uid('dp'), data, categoria: 'Compra de mercadoria', descricao: obs || 'Compra de vinhos', valor: Math.round(total * 100) / 100, pago: true });
         });
         closeModal(); toast(`${titulo} registrada: ${plural(sum(itens, (x) => x.q), 'garrafa')}`);
+        if (onSalvo) return onSalvo();
         if (location.hash.includes('?')) location.hash = location.hash.split('?')[0];
       },
     } });
+  aplicarForm('fmov', snap);
 }
 
 // ---------- Consignação ----------
@@ -325,17 +337,18 @@ function vConsignacao({ query }) {
   `);
 }
 
-function modalRemessa(cid, tipo = 'remessa') {
+function modalRemessa(cid, tipo = 'remessa', snap = {}) {
   const s = S();
   const est = D.estoqueCentral(s);
-  if (!s.clientes.some((c) => c.ativo)) { toast('Cadastre um parceiro primeiro'); location.hash = '#/parceiros'; return; }
-  let sel = cid || s.clientes.find((c) => c.ativo).id;
+  if (!s.clientes.some((c) => c.ativo)) { toast('Cadastre o parceiro para continuar'); return novoParceiro((nid) => modalRemessa(nid, tipo)); }
+  let sel = cid || snap.cliente || s.clientes.find((c) => c.ativo).id;
   const render = () => {
     const saldo = D.saldoCliente(s, sel);
     const recs = D.recomendacoes(s, sel, 3).map((r) => r.produtoId);
     const lista = tipo === 'remessa' ? sortBy(s.produtos.filter((p) => p.ativo), (p) => (saldo[p.id] ? 0 : recs.includes(p.id) ? 1 : 2)) : s.produtos.filter((p) => saldo[p.id] > 0);
     return `<form id="frem" class="col">
-      <label class="field"><span>Parceiro</span><select class="input" name="cliente" data-onchange="cli">${s.clientes.filter((c) => c.ativo).map((c) => `<option value="${c.id}" ${c.id === sel ? 'selected' : ''}>${esc(c.nome)} — ${esc(c.cidade)}</option>`).join('')}</select></label>
+      <label class="field"><span>Parceiro</span><select class="input" name="cliente" data-onchange="cli">${s.clientes.filter((c) => c.ativo).map((c) => `<option value="${c.id}" ${c.id === sel ? 'selected' : ''}>${esc(c.nome)} — ${esc(c.cidade)}</option>`).join('')}<option value="__novo">＋ Cadastrar novo parceiro…</option></select></label>
+      ${tipo === 'remessa' ? `<div class="row between"><span class="small muted">Falta estoque de algum rótulo?</span><button type="button" class="btn ghost sm" data-act="entradaRem">${icon('plus')} Dar entrada no estoque</button></div>` : ''}
       <div class="card pad-0"><div class="list" style="padding:0 14px">${lista.map((p) => `<div class="li">${thumb(p, 'sm')}<div class="grow"><div class="t">${esc(p.nome)} ${recs.includes(p.id) && !saldo[p.id] && tipo === 'remessa' ? badge('Sugestão', 'opp') : ''}</div><div class="s">No parceiro: ${saldo[p.id] || 0} · central: ${est[p.id]}</div></div>${stepper('q:' + p.id, 0, { max: tipo === 'remessa' ? Math.max(0, est[p.id]) : saldo[p.id] })}</div>`).join('') || empty('Nada consignado neste parceiro.')}</div></div>
       ${tipo === 'remessa' ? `<label class="field"><span>Status da entrega</span><select class="input" name="status">${Object.entries(D.STATUS_ENTREGA).map(([k, v]) => `<option value="${k}">${v.label}</option>`).join('')}</select></label>` : ''}
       <label class="field"><span>Observação</span><input class="input" name="obs"></label></form>`;
@@ -344,7 +357,11 @@ function modalRemessa(cid, tipo = 'remessa') {
     foot: `<button class="btn ghost" data-act="close">Cancelar</button><button class="btn" data-act="ok">${tipo === 'remessa' ? 'Registrar remessa' : 'Registrar devolução'}</button>`,
     handlers: {
       step: stepHandler,
-      cli: (el) => { sel = el.value; m.querySelector('.mb').innerHTML = render(); },
+      cli: (el) => {
+        if (el.value === '__novo') { const sn = lerForm('frem'); closeModal(); return novoParceiro((nid) => modalRemessa(nid, tipo, { ...sn, cliente: nid }), () => modalRemessa(sel, tipo, sn)); }
+        sel = el.value; m.querySelector('.mb').innerHTML = render();
+      },
+      entradaRem: () => { const sn = lerForm('frem'); closeModal(); modalMov('entrada', {}, () => modalRemessa(sel, tipo, sn)); },
       ok: () => {
         const fd = new FormData(document.getElementById('frem'));
         const itens = s.produtos.map((p) => ({ p, q: +fd.get('q:' + p.id) || 0 })).filter((x) => x.q > 0);
@@ -363,6 +380,7 @@ function modalRemessa(cid, tipo = 'remessa') {
         else if (location.hash.includes('?')) location.hash = location.hash.split('?')[0];
       },
     } });
+  aplicarForm('frem', snap);
 }
 
 // ---------- Remessas (kanban de entrega) ----------
@@ -710,7 +728,7 @@ function vProduto({ id }) {
     </div>`, { back: true });
 }
 
-function modalProduto(id) {
+function modalProduto(id, onSalvo, onCancelar) {
   const s = S();
   const p = id ? D.produto(s, id) : { id: '', nome: '', tipo: 'Tinto', regiao: '', classificacao: '', uvas: '', teor: '', safra: new Date().getFullYear() - 2, preco: 0, custo: 0, precoCarta: 0, estoqueMin: 24, servir: '18–20 °C', descricao: '', harmonizacao: '', foto: 'assets/logo/simbolo.png', ativo: true };
   const f = (n, l, v, t = 'text') => `<label class="field"><span>${l}</span><input class="input" name="${n}" type="${t}" ${t === 'number' ? 'step="0.01"' : ''} value="${esc(v)}"></label>`;
@@ -723,7 +741,7 @@ function modalProduto(id) {
     <label class="field"><span>Harmonização</span><input class="input" name="harmonizacao" value="${esc(p.harmonizacao)}"></label>
     <label class="row small"><input type="checkbox" name="ativo" ${p.ativo ? 'checked' : ''}> Ativo no catálogo</label></form>`,
     foot: `<button class="btn ghost" data-act="close">Cancelar</button><button class="btn" data-act="ok">Salvar</button>`,
-    handlers: { ok: () => {
+    handlers: { close: () => { closeModal(); onCancelar?.(); }, ok: () => {
       const fd = Object.fromEntries(new FormData(document.getElementById('fprod')));
       if (!fd.nome) return toast('Informe o nome');
       store.commit((st) => {
@@ -731,6 +749,7 @@ function modalProduto(id) {
         Object.assign(alvo, fd, { preco: parseMoney(fd.preco), custo: parseMoney(fd.custo), precoCarta: parseMoney(fd.precoCarta), estoqueMin: +fd.estoqueMin, safra: +fd.safra, ativo: !!fd.ativo });
       });
       closeModal(); toast('Rótulo salvo');
+      onSalvo?.();
     } } });
 }
 
@@ -932,8 +951,8 @@ const common = {
   mov: (el) => modalMov(el.dataset.t),
   remessa: (el) => modalRemessa(el.dataset.c),
   devolucao: (el) => modalRemessa(el.dataset.c, 'devolucao'),
-  editCliente: () => modal({ title: 'Novo parceiro', wide: true, body: formCliente(), handlers: { salvarCliente: (f) => common.salvarCliente(f), novoCodigo: (el) => common.novoCodigo(el) } }),
-  salvarCliente: (f) => {
+  editCliente: () => novoParceiro(),
+  salvarCliente: (f, onSalvo) => {
     const fd = new FormData(f);
     const id = f.dataset.id;
     const formas = fd.getAll('forma');
@@ -954,6 +973,7 @@ const common = {
       if (id) c.ativo = !!fd.get('ativo');
     });
     closeModal(); toast('Parceiro salvo');
+    if (!id && typeof onSalvo === 'function') { toast('Parceiro cadastrado — envie o acesso depois em Configurações'); return onSalvo(nid); }
     if (!id) {
       location.hash = `#/parceiro/${nid}`;
       setTimeout(() => {
@@ -965,7 +985,9 @@ const common = {
       }, 300);
     }
   },
-  novoFech: () => modal({ title: 'Fechamento de qual parceiro?', body: `<div class="list">${S().clientes.filter((c) => c.ativo).map((c) => { const per = D.periodoAtual(S(), c.id); return `<a class="li" href="${per.pendente ? '#/fechamento/' + per.pendente.id : '#/novo-fechamento/' + c.id}" data-act="close"><div class="avatar">${iniciais(c.nome)}</div><div class="grow"><div class="t">${esc(c.nome)}</div><div class="s">${per.pendente ? 'Enviado pelo parceiro — conferir' : 'Previsto ' + date(per.previsto)}</div></div></a>`; }).join('')}</div>`, handlers: { close: (el) => { closeModal(); if (el.getAttribute('href')) location.hash = el.getAttribute('href'); } } }),
+  novoFech: () => modal({ title: 'Fechamento de qual parceiro?', body: `<div class="list">${S().clientes.filter((c) => c.ativo).map((c) => { const per = D.periodoAtual(S(), c.id); return `<a class="li" href="${per.pendente ? '#/fechamento/' + per.pendente.id : '#/novo-fechamento/' + c.id}" data-act="close"><div class="avatar">${iniciais(c.nome)}</div><div class="grow"><div class="t">${esc(c.nome)}</div><div class="s">${per.pendente ? 'Enviado pelo parceiro — conferir' : 'Previsto ' + date(per.previsto)}</div></div></a>`; }).join('')}
+    <a class="li" href="#" data-act="novoParcFech"><div class="avatar">${icon('plus')}</div><div class="grow t">Cadastrar novo parceiro</div></a></div>`,
+    handlers: { close: (el) => { closeModal(); if (el.getAttribute?.('href')) location.hash = el.getAttribute('href'); }, novoParcFech: () => { closeModal(); novoParceiro((nid) => (location.hash = '#/novo-fechamento/' + nid), () => common.novoFech()); } } }),
   aprovar: (el) => {
     const form = document.getElementById('frepo');
     const s = S();
@@ -985,13 +1007,13 @@ const common = {
     const c = D.cliente(s, f.clienteId);
     modal({ title: 'Registrar pagamento', body: `<form id="fpag" class="col"><div class="kpi"><div class="label">${esc(c.nome)}</div><div class="v">${money(f.total)}</div></div>
       <label class="field"><span>Data</span><input class="input" type="date" name="data" value="${today()}"></label>
-      <label class="field"><span>Forma</span><select class="input" name="forma">${c.formasPagamento.map((x) => `<option ${x === f.formaPagamento ? 'selected' : ''}>${x}</option>`).join('')}</select></label></form>`,
+      <label class="field"><span>Forma</span><select class="input" name="forma">${[...new Set([...c.formasPagamento, ...D.FORMAS_PAGAMENTO])].map((x) => `<option ${x === f.formaPagamento ? 'selected' : ''}>${x}</option>`).join('')}</select></label></form>`,
       foot: `<button class="btn ghost" data-act="close">Cancelar</button><button class="btn ok" data-act="ok">Confirmar recebimento</button>`,
       handlers: { ok: () => { const fd = new FormData(document.getElementById('fpag')); store.commit((st) => D.registrarPagamento(st, f.id, { data: fd.get('data'), forma: fd.get('forma') }), 'pago'); closeModal(); toast('Pagamento registrado'); } } });
   },
   despesa: () => modal({ title: 'Nova despesa', body: `<form id="fdesp" class="col"><label class="field"><span>Descrição</span><input class="input" name="descricao" required></label>
       <div class="grid g2"><label class="field"><span>Valor</span>${moneyInput('valor', 0)}</label><label class="field"><span>Data</span><input class="input" type="date" name="data" value="${today()}"></label></div>
-      <label class="field"><span>Categoria</span><select class="input" name="categoria">${['Logística', 'Armazenagem', 'Impostos', 'Marketing', 'Frete e desembaraço', 'Compra de mercadoria', 'Pessoal', 'Outros'].map((c) => `<option>${c}</option>`).join('')}</select></label></form>`,
+      <label class="field"><span>Categoria (escolha ou digite uma nova)</span><input class="input" name="categoria" list="cats-desp" value="Logística" required><datalist id="cats-desp">${[...new Set(['Logística', 'Armazenagem', 'Impostos', 'Marketing', 'Frete e desembaraço', 'Compra de mercadoria', 'Pessoal', 'Outros', ...S().despesas.map((d) => d.categoria)])].map((c) => `<option value="${esc(c)}">`).join('')}</datalist></label></form>`,
     foot: `<button class="btn ghost" data-act="close">Cancelar</button><button class="btn" data-act="ok">Salvar</button>`,
     handlers: { ok: () => { const fd = Object.fromEntries(new FormData(document.getElementById('fdesp'))); const v = parseMoney(fd.valor); if (!fd.descricao || !v) return toast('Preencha descrição e valor'); store.commit((st) => st.despesas.push({ id: uid('dp'), ...fd, valor: v, pago: true })); closeModal(); toast('Despesa lançada'); } } }),
   delDesp: (el) => confirmar('Excluir esta despesa?', { ok: 'Excluir' }).then((y) => y && store.commit((st) => { st.despesas = st.despesas.filter((d) => d.id !== el.dataset.id); })),

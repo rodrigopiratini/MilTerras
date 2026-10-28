@@ -51,7 +51,7 @@ function vInicio() {
   const acabando = Object.entries(est).filter(([pid, q]) => q <= 1 && (D.saldoCliente(s, c.id)[pid] || 0) > 0);
   const ultimo = D.fechamentosDe(s, c.id).filter((f) => f.status !== 'enviado').pop();
   const dias = diffDays(per.previsto, today());
-  const hoje = D.resumoVendas(s, c.id, addDays(today(), -1));
+  const hoje = { garrafas: sum(rv.vendas.filter((v) => v.data === today()), (v) => v.qtd) }; // só o que está no período atual
   const topG = rv.porGarcom[0];
   const transito = D.remessas(s).filter((r) => r.clienteId === c.id && r.status !== 'entregue');
   return shell('Início', `
@@ -59,7 +59,7 @@ function vInicio() {
     <div class="card dark">
       <div class="row between wrap"><div class="label">Período atual · desde ${date(per.desde)}</div>${per.pendente ? badge('Fechamento enviado', 'warn') : badge(dias < 0 ? `fechamento atrasado ${-dias}d` : dias === 0 ? 'fechamento hoje' : `fecha em ${dias} dias`, dias <= 0 ? 'crit' : '')}</div>
       <div class="grid g4 mt" style="gap:14px">
-        <div class="kpi"><div class="label">Vendidas</div><div class="v">${int(rv.garrafas)}</div><div class="d">${hoje.garrafas} hoje</div></div>
+        <div class="kpi"><div class="label">Vendidas no período</div><div class="v">${int(rv.garrafas)}</div><div class="d">${hoje.garrafas} hoje, após o último fechamento</div></div>
         <div class="kpi"><div class="label">Receita na carta</div><div class="v">${moneyK(rv.receita)}</div></div>
         <div class="kpi"><div class="label">A pagar Mil Terras</div><div class="v">${moneyK(rv.custo)}</div></div>
         <div class="kpi"><div class="label">Seu lucro</div><div class="v" style="color:#F2D9A8">${moneyK(rv.receita - rv.custo)}</div><div class="d">${percent(rv.receita ? (rv.receita - rv.custo) / rv.receita : 0)} de margem</div></div>
@@ -110,12 +110,28 @@ function modalVenda(pid) {
     <div class="grid g2 mt" style="gap:10px"><label class="field"><span>Data da venda</span><input class="input" type="date" name="dataVenda" value="${today()}" min="${D.periodoAtual(s, c.id).desde}" max="${today()}"></label>
       <label class="field"><span>Hora</span><input class="input" type="time" name="horaVenda" value="${new Date().toTimeString().slice(0, 5)}"></label></div>
     <div class="label mt mb">Quem vendeu?</div>
-    <div class="chips" id="gchips">${gs.map((x) => `<button type="button" class="chip ${x.id === g ? 'on' : ''}" data-act="g" data-id="${x.id}">${esc(x.nome)}</button>`).join('')}</div>
+    <div class="chips" id="gchips">${gs.map((x) => `<button type="button" class="chip ${x.id === g ? 'on' : ''}" data-act="g" data-id="${x.id}">${esc(x.nome)}</button>`).join('')}<button type="button" class="chip" data-act="novoG">＋ Novo garçom</button></div>
+    <div class="row gap-s mt-s hide" id="novoGbox"><input class="input" id="novoGnome" placeholder="Nome do garçom" maxlength="40"><button type="button" class="btn sm" data-act="salvarG">Adicionar</button></div>
     ${est <= 0 ? `<div class="small mt" style="color:var(--warn)">${icon('alert')} O sistema não tem saldo deste vinho aqui. Confira o estoque no fechamento.</div>` : ''}`,
     foot: `<button class="btn lg block ok" data-act="ok">${icon('check')} Registrar</button>`,
     handlers: {
       step: stepHandler,
       g: (el) => { g = el.dataset.id; el.parentElement.querySelectorAll('.chip').forEach((b) => b.classList.toggle('on', b === el)); },
+      novoG: () => { if (espelhoOk()) return bloqueado(); document.getElementById('novoGbox').classList.remove('hide'); document.getElementById('novoGnome').focus(); },
+      salvarG: () => {
+        const nome = document.getElementById('novoGnome').value.trim();
+        if (!nome) return;
+        const id = 'g' + Date.now().toString(36);
+        store.commit((st) => D.cliente(st, c.id).garcons.push({ id, nome, ativo: true }));
+        g = id;
+        const chip = document.createElement('button');
+        chip.type = 'button'; chip.className = 'chip on'; chip.dataset.act = 'g'; chip.dataset.id = id; chip.textContent = nome;
+        const box = document.getElementById('gchips');
+        box.querySelectorAll('.chip').forEach((b) => b.classList.remove('on'));
+        box.insertBefore(chip, box.lastElementChild);
+        document.getElementById('novoGbox').classList.add('hide');
+        toast(`${nome} adicionado à equipe`);
+      },
       ok: () => {
         const qtd = Math.max(1, +document.querySelector('.modal [name=qtd]').value || 1);
         const data = document.querySelector('.modal [name=dataVenda]').value || today();
@@ -148,7 +164,7 @@ function vRelatorios({ query }) {
   const s = S(), c = C();
   const per = D.periodoAtual(s, c.id);
   const filtros = [['periodo', 'Período atual', per.inicio], ['30', '30 dias', addDays(today(), -30)], ['90', '90 dias', addDays(today(), -90)], ['180', '6 meses', addDays(today(), -180)]];
-  const f = filtros.find((x) => x[0] === (query.p || '30')) || filtros[1];
+  const f = filtros.find((x) => x[0] === (query.p || 'periodo')) || filtros[0];
   const de = f[2];
   const rv = D.resumoVendas(s, c.id, f[0] === 'periodo' ? per.marco : de);
   const dias = Math.max(1, diffDays(today(), de));
@@ -163,7 +179,7 @@ function vRelatorios({ query }) {
   const gs = rv.porGarcom.filter((x) => x.garcomId);
   const pids = rv.porProduto.map((x) => x.produtoId);
   return shell('Relatórios', `
-    ${pageHead('Relatórios de vendas', 'Com base nas vendas registradas pela equipe', `<button class="btn ghost" data-act="csv" data-de="${de}">${icon('download')} Exportar</button>`)}
+    ${pageHead('Relatórios de vendas', `Vendas registradas pela equipe · ${f[0] === 'periodo' ? `período atual, desde ${date(per.desde)} (o mesmo número do Início)` : `${f[1].toLowerCase()}, de ${date(addDays(de, 1))} até hoje (inclui períodos já fechados)`}`, `<button class="btn ghost" data-act="csv" data-de="${de}">${icon('download')} Exportar</button>`)}
     <div class="seg mb" style="max-width:100%;overflow-x:auto">${filtros.map(([k, n]) => `<button class="${f[0] === k ? 'on' : ''}" data-act="goto" data-h="#/relatorios?p=${k}">${n}</button>`).join('')}</div>
     <div class="grid g4">${kpi('Garrafas vendidas', int(rv.garrafas), `${(rv.garrafas / dias).toFixed(1).replace('.', ',')} por dia`)}${kpi('Receita na carta', moneyK(rv.receita), `ticket ${money0(rv.garrafas ? rv.receita / rv.garrafas : 0)}/garrafa`)}${kpi('Custo Mil Terras', moneyK(rv.custo))}${kpi('Seu lucro', moneyK(rv.receita - rv.custo), `${percent(rv.receita ? (rv.receita - rv.custo) / rv.receita : 0)} de margem`)}</div>
     <div class="card mt"><div class="head"><h2>Receita ${semanal ? 'por semana' : 'por dia'}</h2></div>${chart({ type: 'columns', height: 210, data: serie, fmt: money0, fmtAxis: moneyK })}</div>
