@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Mil Terras Apps</title>
+<meta name="description" content="Apps Mil Terras: Gestão (distribuidora) e Parceiro (restaurantes, bares e lojas)">
+<meta name="theme-color" content="#4A1019">
+<link rel="icon" href="assets/icons/icon-192.png">
+<link rel="apple-touch-icon" href="assets/icons/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Poppins:wght@500&family=Lora:ital@1&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="src/css/app.css">
+<style>
+  .hub { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 28px; padding: 32px 16px; background: radial-gradient(120% 80% at 50% 0%, var(--bordo), var(--vinho) 70%); }
+  .hub > img { width: min(300px, 70vw); }
+  .hub .tagline { color: #E9DCC6; font-family: 'Lora', serif; font-style: italic; text-align: center; margin-top: -12px; }
+  .hub .cards { display: grid; grid-template-columns: repeat(2, minmax(0, 300px)); gap: 16px; width: 100%; justify-content: center; }
+  .hub a.card { display: flex; flex-direction: column; gap: 10px; color: var(--ink); transition: transform .15s; }
+  .hub a.card:hover { transform: translateY(-3px); }
+  .hub a.card img { width: 56px; height: 56px; border-radius: 14px; }
+  .hub .foot { color: #C9B3AC; font-size: 12px; text-align: center; }
+  @media (max-width: 640px) { .hub .cards { grid-template-columns: minmax(0, 1fr); } }
+</style>
+</head>
+<body>
+<div class="hub">
+  <img src="assets/logo/logo_v_negativo.png" alt="Mil Terras — vinhos exclusivos">
+  <div class="tagline">Vinhos italianos em consignação, do depósito à mesa.</div>
+  <div class="cards">
+    <a class="card" href="gestor/">
+      <img src="assets/icons/icon-192.png" alt="">
+      <h2>Mil Terras Gestão</h2>
+      <div class="small ink2">Para a distribuidora: estoque central, consignação nos parceiros, fechamentos, financeiro e inteligência.</div>
+      <span class="btn sm" style="align-self:flex-start">Abrir</span>
+    </a>
+    <a class="card" href="cliente/">
+      <img src="assets/icons/icon-cliente-192.png" alt="" style="border:1px solid var(--line)">
+      <h2>Mil Terras Parceiro</h2>
+      <div class="small ink2">Para restaurantes, bares e lojas: registrar vendas, relatórios por vinho e garçom, fechamento e reposição.</div>
+      <span class="btn sm gold" style="align-self:flex-start">Abrir</span>
+    </a>
+  </div>
+  <div class="foot">Abra os dois apps em abas diferentes: o que o parceiro envia aparece na hora para a Gestão.<br>No iPhone: Safari › Compartilhar › Adicionar à Tela de Início.</div>
+</div>
+<script>if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(() => {});</script>
+</body>
+</html>
