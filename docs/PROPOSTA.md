@@ -62,8 +62,8 @@ Dois apps sobre **um único banco de dados**: o **Mil Terras Gestão** (para voc
 ## Roteiro sugerido
 | Fase | Entrega |
 |---|---|
-| **1. Hoje** | Protótipo funcional (este repositório). Dados ficam no aparelho; os dois apps conversam quando abertos no mesmo navegador. Ideal para validar telas e fluxo com 1 ou 2 parceiros de confiança. |
-| **2. Nuvem** (≈1–2 semanas) | Banco Supabase (`supabase/schema.sql` já escrito, com segurança por parceiro e tempo real). Login real por parceiro, sincronização entre aparelhos, publicação em domínio próprio (ex.: `app.milterras.com.br`). |
+| **1. Feito** | Apps completos + demonstração com dados fictícios. |
+| **2. Feito** | Banco Supabase com segurança por parceiro, login real (gestor: e-mail/senha; parceiro: código + PIN), tempo real, fila offline e publicação automática no GitHub Pages. Ver `docs/INSTALACAO.md`. Próximo: domínio próprio (ex.: `app.milterras.com.br`). |
 | **3. Automação** | Notificação push (iPhone 16.4+ e Android) quando chega fechamento ou aprovação; PIX com QR Code dinâmico e baixa automática; emissão de NF-e via integrador; envio automático do relatório em PDF. |
 | **4. Expansão** | Pedido de venda direta (B2C/eventos), metas e comissão por garçom, previsão de compra para a próxima importação, multiusuário (vendedores). |
 

@@ -27,10 +27,10 @@ export function renderWizard(s, w, { modo = 'cliente' } = {}) {
   const per = D.periodoAtual(s, w.cid);
   const saldo = D.saldoCliente(s, w.cid);
   const est = D.saldoEstimado(s, w.cid);
-  const vendas = D.vendasCliente(s, w.cid, per.inicio);
+  const vendas = D.vendasCliente(s, w.cid, per.marco);
   const t = totais(s, w);
   const steps = `<div class="steps">${[1, 2, 3].map((i) => `<i class="${i <= w.step ? 'on' : ''}"></i>`).join('')}</div>`;
-  const head = `<div class="row between wrap mb"><div><div class="label">Fechamento · ${date(addDays(per.inicio, 1))} a ${date(today())}</div>
+  const head = `<div class="row between wrap mb"><div><div class="label">Fechamento · ${date(per.desde)} a ${date(today())}</div>
     <h2 style="margin-top:4px">${['', 'Contagem do estoque', 'Reposição e novos rótulos', 'Pagamento e envio'][w.step]}</h2></div>
     <div class="right"><div class="label">A pagar</div><div class="num" style="font-family:var(--font-t);font-size:22px;color:var(--bordo)">${money(t.valor)}</div><div class="tiny muted">${plural(t.garrafas, 'garrafa vendida', 'garrafas vendidas')}</div></div></div>`;
 

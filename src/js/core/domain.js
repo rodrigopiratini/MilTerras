@@ -66,18 +66,23 @@ export function periodoAtual(s, cid) {
   const pend = pendente(s, cid);
   const ult = ultimoFechado(s, cid);
   const inicio = pend?.fim || ult?.fim || c.desde;
-  return { inicio, previsto: addDays(inicio, c.cicloDias), pendente: pend, ultimo: ult };
+  // marco: vendas do mesmo dia só entram no período se foram lançadas depois do fechamento (ts)
+  const ref = pend || ult;
+  const marco = ref ? { data: ref.fim, ts: ref.ts ?? Infinity } : { data: c.desde, ts: 0 };
+  return { inicio, marco, desde: ref ? addDays(inicio, 1) : inicio, previsto: addDays(inicio, c.cicloDias), pendente: pend, ultimo: ult };
 }
 
+// de: data 'YYYY-MM-DD' (exclusiva) ou o marco de um período { data, ts }
+const depoisDe = (v, de) => !de || (typeof de === 'string' ? v.data > de : v.data > de.data || (v.data === de.data && (v.ts || 0) > de.ts));
 export const vendasCliente = (s, cid, de, ate) =>
-  s.vendas.filter((v) => v.clienteId === cid && (!de || v.data > de) && (!ate || v.data <= ate));
+  s.vendas.filter((v) => v.clienteId === cid && depoisDe(v, de) && (!ate || v.data <= ate));
 
 // Saldo esperado agora no parceiro: consignado (ou última contagem enviada) menos vendas registradas depois
 export function saldoEstimado(s, cid) {
   const per = periodoAtual(s, cid);
   const base = { ...saldoCliente(s, cid) };
   if (per.pendente) for (const it of per.pendente.itens) base[it.produtoId] = it.contagem;
-  for (const v of vendasCliente(s, cid, per.inicio)) base[v.produtoId] = (base[v.produtoId] || 0) - v.qtd;
+  for (const v of vendasCliente(s, cid, per.marco)) base[v.produtoId] = (base[v.produtoId] || 0) - v.qtd;
   for (const k of Object.keys(base)) if (base[k] < 0) base[k] = 0;
   return base;
 }
@@ -94,7 +99,7 @@ export function taxaDiaria(s, cid, pid, janela = 75) {
     if (!inicio || f.inicio < inicio) inicio = f.inicio;
   }
   const per = periodoAtual(s, cid);
-  vendido += sum(vendasCliente(s, cid, per.inicio).filter((v) => v.produtoId === pid), (v) => v.qtd);
+  vendido += sum(vendasCliente(s, cid, per.marco).filter((v) => v.produtoId === pid), (v) => v.qtd);
   inicio = inicio || per.inicio;
   const dias = Math.max(7, diffDays(today(), inicio));
   return vendido / dias;
@@ -117,7 +122,7 @@ export function montarFechamento(s, cid, { contagem, reposicao = {}, forma, obs 
   const c = cliente(s, cid);
   const per = periodoAtual(s, cid);
   const saldo = saldoCliente(s, cid);
-  const registradas = vendasCliente(s, cid, per.inicio, data);
+  const registradas = vendasCliente(s, cid, per.marco, data);
   const itens = Object.keys({ ...saldo, ...contagem })
     .filter((pid) => (saldo[pid] || 0) > 0 || contagem[pid] > 0)
     .map((pid) => {
@@ -134,7 +139,7 @@ export function montarFechamento(s, cid, { contagem, reposicao = {}, forma, obs 
     id: uid('fc'), clienteId: cid, inicio: per.inicio, fim: data, status: 'enviado', criadoPor,
     itens, total: sum(itens, (i) => i.valor), garrafas: sum(itens, (i) => i.vendido),
     reposicao: Object.entries(reposicao).filter(([, q]) => q > 0).map(([produtoId, qtd]) => ({ produtoId, qtd })),
-    formaPagamento: forma || c.formaPadrao, obs, enviadoEm: data,
+    formaPagamento: forma || c.formaPadrao, obs, enviadoEm: data, ts: Date.now(),
   };
 }
 
@@ -178,7 +183,7 @@ export function registrarPagamento(s, id, { data = today(), forma } = {}) {
 
 export function registrarVenda(s, { clienteId, produtoId, qtd = 1, garcomId, data = today(), hora }) {
   const c = cliente(s, clienteId);
-  const v = { id: uid('vd'), data, hora, clienteId, produtoId, qtd, garcomId, precoCarta: precoCarta(s, c, produtoId), preco: produto(s, produtoId).preco };
+  const v = { id: uid('vd'), ts: Date.now(), data, hora, clienteId, produtoId, qtd, garcomId, precoCarta: precoCarta(s, c, produtoId), preco: produto(s, produtoId).preco };
   s.vendas.push(v);
   return v;
 }
@@ -304,7 +309,10 @@ export function recomendacoes(s, cid, n = 3) {
       if (r > 0) (score[p.id] ||= { produtoId: p.id, score: 0, n: 0 }), score[p.id].score += r * 30 * peso, score[p.id].n++;
     }
   }
-  return Object.values(score).map((x) => ({ ...x, mes: x.score / x.n })).sort((a, b) => b.mes - a.mes).slice(0, n);
+  const out = Object.values(score).map((x) => ({ ...x, mes: x.score / x.n })).sort((a, b) => b.mes - a.mes).slice(0, n);
+  // No app do parceiro só existe o próprio cadastro: usa as sugestões calculadas pela Gestão
+  if (!out.length && c.recomendados?.length) return c.recomendados.filter((pid) => !tem.has(pid)).slice(0, n).map((produtoId) => ({ produtoId, score: 0, n: 0, mes: 0 }));
+  return out;
 }
 
 export function insights(s) {

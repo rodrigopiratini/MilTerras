@@ -10,7 +10,7 @@ import { novoWizard, renderWizard, wizardHandlers, statusBadge } from '../core/f
 const app = document.getElementById('app');
 const S = () => store.get();
 const SESSION = 'milterras:parceiro';
-const cid = () => localStorage.getItem(SESSION);
+const cid = () => (store.modo === 'local' ? localStorage.getItem(SESSION) : store.perfil()?.clienteId);
 const C = () => D.cliente(S(), cid());
 
 const NAV = [['#/inicio', 'home', 'Início'], ['#/relatorios', 'chart', 'Relatórios'], ['#/vender', 'plus', 'Vender'], ['#/fechamento', 'receipt', 'Fechamento'], ['#/mais', 'menu', 'Mais']];
@@ -43,7 +43,7 @@ const pageHead = (t, sub = '', actions = '') => `<div class="pagehead"><div><h1>
 function vInicio() {
   const s = S(), c = C();
   const per = D.periodoAtual(s, c.id);
-  const rv = D.resumoVendas(s, c.id, per.inicio);
+  const rv = D.resumoVendas(s, c.id, per.marco);
   const est = D.saldoEstimado(s, c.id);
   const acabando = Object.entries(est).filter(([pid, q]) => q <= 1 && (D.saldoCliente(s, c.id)[pid] || 0) > 0);
   const ultimo = D.fechamentosDe(s, c.id).filter((f) => f.status !== 'enviado').pop();
@@ -53,7 +53,7 @@ function vInicio() {
   return shell('Início', `
     <div class="pagehead"><div><div class="label">${esc(c.cidade)}</div><h1 style="margin-top:4px">${esc(c.nome)}</h1></div><a class="btn hide-m" href="#/vender">${icon('plus')} Registrar venda</a></div>
     <div class="card dark">
-      <div class="row between wrap"><div class="label">Período atual · desde ${date(addDays(per.inicio, 1))}</div>${per.pendente ? badge('Fechamento enviado', 'warn') : badge(dias < 0 ? `fechamento atrasado ${-dias}d` : dias === 0 ? 'fechamento hoje' : `fecha em ${dias} dias`, dias <= 0 ? 'crit' : '')}</div>
+      <div class="row between wrap"><div class="label">Período atual · desde ${date(per.desde)}</div>${per.pendente ? badge('Fechamento enviado', 'warn') : badge(dias < 0 ? `fechamento atrasado ${-dias}d` : dias === 0 ? 'fechamento hoje' : `fecha em ${dias} dias`, dias <= 0 ? 'crit' : '')}</div>
       <div class="grid g4 mt" style="gap:14px">
         <div class="kpi"><div class="label">Vendidas</div><div class="v">${int(rv.garrafas)}</div><div class="d">${hoje.garrafas} hoje</div></div>
         <div class="kpi"><div class="label">Receita na carta</div><div class="v">${moneyK(rv.receita)}</div></div>
@@ -137,7 +137,7 @@ function vRelatorios({ query }) {
   const filtros = [['periodo', 'Período atual', per.inicio], ['30', '30 dias', addDays(today(), -30)], ['90', '90 dias', addDays(today(), -90)], ['180', '6 meses', addDays(today(), -180)]];
   const f = filtros.find((x) => x[0] === (query.p || '30')) || filtros[1];
   const de = f[2];
-  const rv = D.resumoVendas(s, c.id, de);
+  const rv = D.resumoVendas(s, c.id, f[0] === 'periodo' ? per.marco : de);
   const dias = Math.max(1, diffDays(today(), de));
   const semanal = dias > 45;
   const buckets = {};
@@ -170,7 +170,7 @@ function vFechamentos() {
   const s = S(), c = C();
   const per = D.periodoAtual(s, c.id);
   const fs = D.fechamentosDe(s, c.id).reverse();
-  const rv = D.resumoVendas(s, c.id, per.inicio);
+  const rv = D.resumoVendas(s, c.id, per.marco);
   return shell('Fechamento', `
     ${pageHead('Fechamento', `Acerto a cada ${c.cicloDias} dias · você paga só o que vendeu`)}
     ${per.pendente ? `<div class="card" style="border-left:3px solid var(--warn)"><div class="row between wrap"><div><div class="label">Enviado em ${date(per.pendente.enviadoEm)}</div><div style="font-weight:600;font-size:18px;margin-top:4px">${money(per.pendente.total)} · ${plural(per.pendente.garrafas, 'garrafa')}</div><div class="small muted">A Mil Terras está conferindo. Você será avisado quando a reposição sair.</div></div><a class="btn ghost" href="#/fechamento/${per.pendente.id}">Ver</a></div></div>`
@@ -256,13 +256,14 @@ function vAjustes() {
 
 // ---------- Login ----------
 function vLogin() {
-  const s = S();
+  const s = S() || { meta: {} };
   return `<div class="login"><form class="box col" data-onsubmit="login" style="gap:14px">
     <img class="logo" src="${asset('assets/logo/logo_v.png')}" alt="Mil Terras">
     <div class="center"><div class="label">Portal do parceiro</div></div>
     <label class="field"><span>Código do estabelecimento</span><input class="input" name="codigo" autocapitalize="characters" autocomplete="username" required style="text-transform:uppercase"></label>
     <label class="field"><span>PIN</span><input class="input" name="pin" type="password" inputmode="numeric" maxlength="4" autocomplete="current-password" required></label>
     <button class="btn lg block">Entrar</button>
+    ${store.modo === 'local' ? '<div class="tiny center" style="color:var(--dourado)">Modo demonstração · dados fictícios</div>' : ''}
     ${s.meta.demo ? `<div class="tiny muted center">Demonstração: use o código <b>${s.clientes[0].codigo}</b> e PIN <b>${s.clientes[0].pin}</b><br>(outros: ${s.clientes.slice(1, 5).map((c) => c.codigo).join(', ')})</div>` : ''}
   </form></div>`;
 }
@@ -274,7 +275,7 @@ function render(view, params, pattern) {
   current = { view, params, pattern };
   handlers = {};
   resetCharts();
-  const ok = cid() && C()?.ativo;
+  const ok = S() && cid() && C()?.ativo;
   app.innerHTML = ok ? view(params) : vLogin();
   mountCharts(app);
 }
@@ -287,9 +288,15 @@ const common = {
   print: () => window.print(),
   install: instalar,
   step: stepHandler,
-  logout: () => { localStorage.removeItem(SESSION); go(); },
-  login: (f) => {
+  logout: async () => { localStorage.removeItem(SESSION); await store.sair(); go(); },
+  login: async (f) => {
     const fd = new FormData(f);
+    if (store.modo === 'nuvem') {
+      const btn = f.querySelector('button'); btn.disabled = true;
+      try { await store.entrarParceiro(String(fd.get('codigo')), String(fd.get('pin'))); location.hash = '#/inicio'; go(); }
+      catch (e) { toast(e.message); btn.disabled = false; }
+      return;
+    }
     const c = S().clientes.find((x) => x.ativo && x.codigo === String(fd.get('codigo')).trim().toUpperCase() && x.pin === String(fd.get('pin')).trim());
     if (!c) return toast('Código ou PIN incorreto');
     localStorage.setItem(SESSION, c.id);
@@ -311,9 +318,13 @@ const common = {
 
 delegate(app, new Proxy({}, { get: (_, k) => handlers[k] || common[k] }));
 store.subscribe((s, msg, externo) => {
+  if (!S()) return;
+  if (document.querySelector('.overlay') && externo) return;
   if (externo && msg === 'aprovado') toast('A Mil Terras aprovou seu fechamento — reposição a caminho!');
   if (current.pattern === '/fechamento/novo' && msg !== 'fechamento') return; // não interromper a contagem
   rerender();
 });
+store.onErro((m) => toast('Não foi possível salvar: ' + m));
 registerSW();
-go();
+app.innerHTML = `<div class="login"><img src="${asset('assets/logo/logo_v_negativo.png')}" alt="Mil Terras" style="width:200px;opacity:.9"></div>`;
+store.init('parceiro').then(() => go());

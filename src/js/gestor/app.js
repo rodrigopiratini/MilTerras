@@ -38,7 +38,7 @@ function shell(title, content, { back } = {}) {
     <aside class="side">
       <div class="brand"><img src="${asset('assets/logo/logo_h_negativo.png')}" alt="Mil Terras"><div class="who">Gestão</div></div>
       ${NAV.map(([h, ic, n]) => `<a class="nav-a ${isOn(h) ? 'on' : ''}" href="${h}">${icon(ic)}<span>${n}</span>${b(h)}</a>`).join('')}
-      <div class="foot"><span class="sync">Sincronizado</span><br><a href="#" data-act="logout" style="color:#C9B3AC">Sair</a></div>
+      <div class="foot">${syncBadge()}<br><a href="#" data-act="logout" style="color:#C9B3AC">Sair</a></div>
     </aside>
     <div>
       <header class="topbar">${back ? `<button data-act="back" aria-label="Voltar">${icon('arrowL')}</button>` : `<img src="${asset('assets/logo/simbolo_negativo.png')}" alt="">`}<div class="t ellipsis">${title}</div><a href="#/fechamentos" style="color:#fff;position:relative">${icon('inbox')}${pend ? `<span class="badge dot" style="position:absolute;top:-6px;right:-8px">${pend}</span>` : ''}</a></header>
@@ -46,6 +46,12 @@ function shell(title, content, { back } = {}) {
     </div>
     <nav class="tabbar">${TABS.map(([h, ic, n]) => `<a href="${h}" class="${isOn(h) ? 'on' : ''}">${icon(ic)}<span>${n}</span>${b(h)}</a>`).join('')}</nav>
   </div>`;
+}
+const DEMO_Q = store.modo === 'local' && location.search ? location.search : '';
+function syncBadge() {
+  const st = store.status();
+  const t = { local: store.demo && S().meta.demo ? 'Demonstração (dados locais)' : 'Dados neste navegador', online: 'Sincronizado', enviando: `Enviando ${store.pendentes()}…`, offline: `Sem internet · ${store.pendentes()} pendente(s)` }[st] || st;
+  return `<span class="sync" style="${st === 'offline' ? 'color:var(--warn)' : st === 'local' ? 'color:var(--dourado)' : ''}">${t}</span>`;
 }
 const pageHead = (title, sub = '', actions = '') => `<div class="pagehead"><div><h1>${title}</h1>${sub ? `<div class="sub">${sub}</div>` : ''}</div><div class="row wrap">${actions}</div></div>`;
 
@@ -66,7 +72,7 @@ function vPainel() {
   let gCons = 0, vCons = 0, nParc = 0;
   for (const [cid, m] of Object.entries(cons)) { const g = sum(Object.values(m)); if (g > 0) nParc++; gCons += g; vCons += sum(Object.entries(m), ([pid, q]) => q * D.produto(s, pid).preco); }
   const ins = D.insights(s);
-  const abc = D.curvaABC(s).slice(0, 7);
+  const abc = D.curvaABC(s).filter((x) => x.receita > 0).slice(0, 7);
   const rank = D.rankingClientes(s).slice(0, 6);
   const agenda = s.clientes.filter((c) => c.ativo).map((c) => ({ c, per: D.periodoAtual(s, c.id) })).sort((a, b) => (a.per.pendente ? -1 : 0) - (b.per.pendente ? -1 : 0) || (a.per.previsto < b.per.previsto ? -1 : 1));
   const delta = ant.receita ? (projecao - ant.receita) / ant.receita : 0;
@@ -91,16 +97,16 @@ function vPainel() {
     </div>
     <div class="grid g3 mt">
       <div class="card"><div class="head"><h2>Rótulos que mais faturam</h2><span class="muted small">90 dias</span></div>
-        ${hbars(abc.map((x) => ({ label: x.produto.nome, value: x.receita, sub: `Curva ${x.classe} · ${percent(x.share)} da receita` })), moneyK)}</div>
+        ${abc.length ? hbars(abc.map((x) => ({ label: x.produto.nome, value: x.receita, sub: `Curva ${x.classe} · ${percent(x.share)} da receita` })), moneyK) : empty('As vendas aparecem aqui após os primeiros fechamentos.')}</div>
       <div class="card"><div class="head"><h2>Melhores parceiros</h2><span class="muted small">90 dias</span></div>
-        ${hbars(rank.map((x) => ({ label: x.cliente.nome, value: x.receita, sub: `${x.garrafas} garrafas · giro ${x.giro.toFixed(1)}×` })), moneyK, { color: 'var(--dourado)' })}</div>
+        ${rank.length ? hbars(rank.map((x) => ({ label: x.cliente.nome, value: x.receita, sub: `${x.garrafas} garrafas · giro ${x.giro.toFixed(1)}×` })), moneyK, { color: 'var(--dourado)' }) : empty('Cadastre o primeiro parceiro.', 'store')}</div>
       <div class="card"><div class="head"><h2>Agenda de fechamentos</h2></div>
         <div class="list">${agenda.slice(0, 6).map(({ c, per }) => `<a class="li" href="${per.pendente ? '#/fechamento/' + per.pendente.id : '#/parceiro/' + c.id}"><div class="avatar">${iniciais(c.nome)}</div><div class="grow"><div class="t ellipsis">${esc(c.nome)}</div><div class="s">${esc(c.cidade)}</div></div>
           ${per.pendente ? badge('Enviado', 'warn') : badge(relDays(per.previsto), per.previsto < today() ? 'crit' : per.previsto <= addDays(today(), 3) ? 'info' : '')}</a>`).join('')}</div></div>
     </div>
     <div class="card mt"><div class="head"><h2>Onde está cada garrafa</h2><span class="muted small">estoque central × consignado</span></div>
       ${legend([['Estoque central', 'var(--s1)'], ['Em consignação', 'var(--s2)']])}
-      <div class="hbars">${sortBy(s.produtos, (p) => -(Math.max(0, est[p.id]) + sum(Object.values(cons), (m) => m[p.id] || 0))).map((p) => {
+      <div class="hbars">${sortBy(s.produtos.filter((p) => Math.max(0, est[p.id]) + sum(Object.values(cons), (m) => m[p.id] || 0) > 0), (p) => -(Math.max(0, est[p.id]) + sum(Object.values(cons), (m) => m[p.id] || 0))).map((p) => {
         const c1 = Math.max(0, est[p.id]), c2 = sum(Object.values(cons), (m) => m[p.id] || 0);
         return `<div class="hb" data-tip="${esc(`<b>${esc(p.nome)}</b><br>Central: ${c1}<br>Consignado: ${c2}`)}"><div class="ellipsis">${esc(p.nome)}</div>
           <div class="bar-t" style="display:flex;gap:2px;background:none"><i style="width:${(100 * c1) / maxQ}%;background:var(--s1);border-radius:0"></i><i style="width:${(100 * c2) / maxQ}%;background:var(--s2)"></i></div><div class="v">${c1 + c2}</div></div>`;
@@ -197,6 +203,7 @@ function vConsignacao({ query }) {
 function modalRemessa(cid, tipo = 'remessa') {
   const s = S();
   const est = D.estoqueCentral(s);
+  if (!s.clientes.some((c) => c.ativo)) { toast('Cadastre um parceiro primeiro'); location.hash = '#/parceiros'; return; }
   let sel = cid || s.clientes.find((c) => c.ativo).id;
   const render = () => {
     const saldo = D.saldoCliente(s, sel);
@@ -490,23 +497,28 @@ function modalProduto(id) {
 // ---------- Configurações / mais ----------
 function vConfig() {
   const s = S();
-  const base = new URL('../cliente/', location.href).href;
+  const base = new URL('../cliente/' + DEMO_Q, location.href).href;
+  const nuvem = store.modo === 'nuvem';
   return shell('Configurações', `
     ${pageHead('Configurações')}
     <div class="grid g2">
-      <div class="card col"><h2>Acesso dos parceiros</h2><div class="small ink2">Cada parceiro entra no app <b>Mil Terras Parceiro</b> com o código do estabelecimento e um PIN. Envie o link pelo WhatsApp:</div>
-        <div class="list">${s.clientes.filter((c) => c.ativo).map((c) => `<div class="li"><div class="grow"><div class="t">${esc(c.nome)}</div><div class="s">Código <b>${esc(c.codigo)}</b> · PIN <b>${esc(c.pin)}</b></div></div><a class="btn ghost sm" target="_blank" rel="noopener" href="${waLink(c.telefone, `Olá! Este é o app da Mil Terras para acompanhar suas vendas e fazer os fechamentos:\n${base}\n\nCódigo: ${c.codigo}\nPIN: ${c.pin}\n\nNo iPhone, abra no Safari e toque em Compartilhar › Adicionar à Tela de Início.`)}">${icon('whatsapp')} Enviar</a></div>`).join('')}</div>
+      <div class="card col"><h2>Acesso dos parceiros</h2><div class="small ink2">Cada parceiro entra no app <b>Mil Terras Parceiro</b> com o código do estabelecimento e um PIN. Envie o link pelo WhatsApp. Trocar o PIN (no cadastro do parceiro) desconecta os aparelhos dele.</div>
+        <div class="list">${s.clientes.filter((c) => c.ativo).map((c) => `<div class="li"><div class="grow"><div class="t">${esc(c.nome)}</div><div class="s">Código <b>${esc(c.codigo)}</b> · PIN <b>${esc(c.pin)}</b></div></div><a class="btn ghost sm" target="_blank" rel="noopener" href="${waLink(c.telefone, `Olá! Este é o app da Mil Terras para acompanhar suas vendas e fazer os fechamentos:\n${base}\n\nCódigo: ${c.codigo}\nPIN: ${c.pin}\n\nNo iPhone, abra no Safari e toque em Compartilhar › Adicionar à Tela de Início.`)}">${icon('whatsapp')} Enviar</a></div>`).join('') || empty('Nenhum parceiro cadastrado ainda', 'store')}</div>
         <a class="btn ghost" href="${base}" target="_blank" rel="noopener">${icon('link')} Abrir app do parceiro</a></div>
       <div class="col">
         <div class="card col"><h2>Empresa</h2><form class="col" data-onsubmit="salvarEmpresa">
           <label class="field"><span>Nome</span><input class="input" name="empresa" value="${esc(s.meta.empresa)}"></label>
-          <label class="field"><span>WhatsApp</span><input class="input" name="whatsapp" value="${esc(s.meta.whatsapp)}"></label>
-          <label class="field"><span>PIN do gestor</span><input class="input" name="pinGestor" inputmode="numeric" maxlength="6" value="${esc(s.meta.pinGestor)}"></label>
+          <label class="field"><span>WhatsApp (com DDI e DDD)</span><input class="input" name="whatsapp" value="${esc(s.meta.whatsapp)}"></label>
+          <label class="field"><span>Instagram</span><input class="input" name="instagram" value="${esc(s.meta.instagram)}"></label>
+          ${nuvem ? '' : `<label class="field"><span>PIN do gestor (modo local)</span><input class="input" name="pinGestor" inputmode="numeric" maxlength="4" value="${esc(s.meta.pinGestor)}"></label>`}
           <button class="btn">Salvar</button></form></div>
-        <div class="card col"><h2>Dados e backup</h2>
-          <div class="small ink2">Nesta versão os dados ficam salvos neste navegador. Faça backup periódico ou conecte ao banco na nuvem (ver documentação).</div>
-          <div class="row wrap"><button class="btn ghost" data-act="backup">${icon('download')} Exportar backup</button><label class="btn ghost">${icon('upload')} Importar<input type="file" accept="application/json" hidden data-onchange="restore"></label><button class="btn ghost" data-act="install">${icon('download')} Instalar app</button></div>
-          <div class="row wrap"><button class="btn ghost" data-act="resetDemo">${icon('refresh')} Recarregar demonstração</button><button class="btn ghost" data-act="zerar" style="color:var(--crit)">${icon('trash')} Começar do zero</button></div>
+        <div class="card col"><h2>Dados</h2>
+          ${nuvem ? `<div class="small ink2">${icon('check')} Conectado ao banco na nuvem (Supabase). Os dados ficam disponíveis em qualquer aparelho e são compartilhados com os parceiros em tempo real.</div>
+            <div class="small ink2">Outro gestor: ele cria a conta em <b>Primeiro acesso</b> na tela de login, usando o código de instalação.</div>
+            <div class="row wrap"><button class="btn ghost" data-act="backup">${icon('download')} Exportar backup</button><button class="btn ghost" data-act="install">${icon('download')} Instalar app</button><a class="btn ghost" href="?demo=1#/painel" target="_blank" rel="noopener">${icon('spark')} Abrir demonstração</a></div>`
+          : `<div class="small ink2">${store.demo && s.meta.demo ? 'Você está na <b>demonstração</b>: dados fictícios salvos só neste navegador. Nada aqui afeta os dados reais.' : 'Os dados estão salvos só neste navegador.'}</div>
+            <div class="row wrap"><button class="btn ghost" data-act="backup">${icon('download')} Exportar backup</button><label class="btn ghost">${icon('upload')} Importar<input type="file" accept="application/json" hidden data-onchange="restore"></label><button class="btn ghost" data-act="install">${icon('download')} Instalar app</button></div>
+            <div class="row wrap"><button class="btn ghost" data-act="resetDemo">${icon('refresh')} Recarregar demonstração</button><button class="btn ghost" data-act="zerar" style="color:var(--crit)">${icon('trash')} Começar do zero</button></div>`}
         </div>
       </div>
     </div>`);
@@ -558,13 +570,29 @@ function vImprimirRomaneio({ cid }) {
 }
 
 // ---------- Login ----------
+let telaLogin = 'entrar';
 function vLogin() {
-  return `<div class="login"><form class="box col" data-onsubmit="login" style="gap:16px">
+  if (store.modo === 'local') return `<div class="login"><form class="box col" data-onsubmit="login" style="gap:16px">
     <img class="logo" src="${asset('assets/logo/logo_v.png')}" alt="Mil Terras">
-    <div class="center"><div class="label">Gestão</div><div class="small muted mt-s">Digite seu PIN para entrar</div></div>
+    <div class="center"><div class="label">Gestão · demonstração</div><div class="small muted mt-s">Digite seu PIN para entrar</div></div>
     <div class="pin">${[0, 1, 2, 3].map((i) => `<input inputmode="numeric" maxlength="1" name="p${i}" data-oninput="pin" autocomplete="off" ${i === 0 ? 'autofocus' : ''}>`).join('')}</div>
     <button class="btn lg block">Entrar</button>
-    <div class="tiny muted center">Demonstração: PIN 0000</div></form></div>`;
+    <div class="tiny muted center">${S().meta.demo ? 'Demonstração: PIN 0000 · dados fictícios, só neste navegador' : 'PIN padrão 0000'}</div></form></div>`;
+  const logo = `<img class="logo" src="${asset('assets/logo/logo_v.png')}" alt="Mil Terras">`;
+  if (telaLogin === 'ativar') return `<div class="login"><form class="box col" data-onsubmit="ativar" style="gap:14px">${logo}
+    <div class="center"><div class="label">Ativar acesso de gestor</div><div class="small muted mt-s">Informe o código de instalação mostrado quando o banco foi instalado.</div></div>
+    <label class="field"><span>Código de instalação</span><input class="input" name="codigo" required autocapitalize="characters" style="text-transform:uppercase"></label>
+    <button class="btn lg block">Ativar</button><a href="#" class="small center" data-act="logout">Usar outra conta</a></form></div>`;
+  const novo = telaLogin === 'novo';
+  return `<div class="login"><form class="box col" data-onsubmit="${novo ? 'cadastrar' : 'entrar'}" style="gap:14px">${logo}
+    <div class="center"><div class="label">Gestão</div></div>
+    <div class="seg" style="align-self:center"><button type="button" class="${novo ? '' : 'on'}" data-act="telaLogin" data-v="entrar">Entrar</button><button type="button" class="${novo ? 'on' : ''}" data-act="telaLogin" data-v="novo">Primeiro acesso</button></div>
+    <label class="field"><span>E-mail</span><input class="input" name="email" type="email" autocomplete="username" required></label>
+    <label class="field"><span>Senha${novo ? ' (mínimo 8 caracteres)' : ''}</span><input class="input" name="senha" type="password" minlength="${novo ? 8 : 1}" autocomplete="${novo ? 'new-password' : 'current-password'}" required></label>
+    ${novo ? '<label class="field"><span>Código de instalação</span><input class="input" name="codigo" required style="text-transform:uppercase"></label>' : ''}
+    <button class="btn lg block">${novo ? 'Criar acesso' : 'Entrar'}</button>
+    ${novo ? '' : '<a href="#" class="small center" data-act="esqueci">Esqueci minha senha</a>'}
+    <a class="tiny muted center" href="?demo=1">Ver demonstração com dados fictícios</a></form></div>`;
 }
 
 // ---------- Render ----------
@@ -579,7 +607,8 @@ function render(view, params, pattern) {
   current = { view, params, pattern };
   handlers = {};
   resetCharts();
-  const logged = sessionStorage.getItem(SESSION) || localStorage.getItem(SESSION);
+  const logged = store.modo === 'local' ? localStorage.getItem(SESSION) : store.perfil()?.papel === 'gestor' && S();
+  if (!logged && store.modo === 'nuvem' && store.perfil()) telaLogin = 'ativar';
   app.innerHTML = logged ? view(params) : vLogin();
   mountCharts(app);
   if (!logged) app.querySelector('[name=p0]')?.focus();
@@ -593,7 +622,33 @@ const common = {
   qty: () => {},
   back: () => history.length > 1 ? history.back() : (location.hash = '#/painel'),
   print: () => window.print(),
-  logout: () => { sessionStorage.removeItem(SESSION); localStorage.removeItem(SESSION); go(); },
+  logout: async () => { localStorage.removeItem(SESSION); telaLogin = 'entrar'; await store.sair(); go(); },
+  telaLogin: (el) => { telaLogin = el.dataset.v; go(); },
+  entrar: async (f) => {
+    const fd = new FormData(f); const btn = f.querySelector('button.lg'); btn.disabled = true;
+    try { const ok = await store.entrarGestor(fd.get('email').trim(), fd.get('senha')); if (!ok) telaLogin = 'ativar'; else { await aposEntrar(); if (!location.hash || location.hash === '#/') location.hash = '#/painel'; } go(); }
+    catch (e) { toast(e.message); btn.disabled = false; }
+  },
+  cadastrar: async (f) => {
+    const fd = new FormData(f); const btn = f.querySelector('button.lg'); btn.disabled = true;
+    try {
+      let sessao;
+      try { sessao = await store.cadastrarGestor(fd.get('email').trim(), fd.get('senha')); }
+      catch (e) {
+        if (!/already|registered/i.test(e.message)) throw e;
+        if (await store.entrarGestor(fd.get('email').trim(), fd.get('senha'))) { location.hash = '#/painel'; go(); return; } // já era gestor
+        sessao = true; // conta existe e a senha confere: falta só ativar
+      }
+      if (!sessao) { modal({ title: 'Confirme seu e-mail', body: '<p>Enviamos um link de confirmação para o seu e-mail. Abra o link, volte aqui, entre com e-mail e senha e informe o código de instalação.</p>' }); telaLogin = 'entrar'; go(); return; }
+      await store.ativarGestor(String(fd.get('codigo')));
+      await aposEntrar(); location.hash = '#/painel'; go();
+    } catch (e) { toast(e.message); btn.disabled = false; if (store.perfil() === null) { telaLogin = 'ativar'; go(); } }
+  },
+  ativar: async (f) => {
+    try { await store.ativarGestor(new FormData(f).get('codigo')); await aposEntrar(); location.hash = '#/painel'; go(); } catch (e) { toast(e.message); }
+  },
+  esqueci: () => modal({ title: 'Recuperar senha', body: '<form id="fes" class="col"><label class="field"><span>E-mail</span><input class="input" name="email" type="email" required></label></form>', foot: '<button class="btn" data-act="ok">Enviar link</button>',
+    handlers: { ok: async () => { const email = new FormData(document.getElementById('fes')).get('email'); if (!email) return; await store.redefinirSenha(email); closeModal(); toast('Se o e-mail existir, você receberá um link.'); } } }),
   install: instalar,
   pin: (el) => { el.value = el.value.replace(/\D/g, ''); if (el.value) el.nextElementSibling?.focus(); const f = el.form; if ([...f.querySelectorAll('input')].every((i) => i.value)) f.requestSubmit(); },
   login: (f) => {
@@ -610,6 +665,9 @@ const common = {
     const id = f.dataset.id;
     const formas = fd.getAll('forma');
     if (!formas.length) return toast('Libere ao menos uma forma de pagamento');
+    const cod = String(fd.get('codigo') || fd.get('nome')).toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10);
+    if (S().clientes.some((c) => c.id !== id && c.codigo === cod)) return toast(`O código ${cod} já é usado por outro parceiro`);
+    if (!/^\d{4}$/.test(String(fd.get('pin')))) return toast('O PIN precisa ter 4 números');
     let nid = id;
     store.commit((st) => {
       let c = id ? D.cliente(st, id) : null;
@@ -619,7 +677,7 @@ const common = {
       for (const n of nomes) if (!c.garcons.some((g) => g.nome === n)) c.garcons.push({ id: uid('g'), nome: n, ativo: true });
       Object.assign(c, { nome: fd.get('nome'), tipo: fd.get('tipo'), cidade: fd.get('cidade'), regiao: fd.get('regiao'), contato: fd.get('contato'), telefone: fd.get('telefone'), email: fd.get('email'), cnpj: fd.get('cnpj'),
         cicloDias: +fd.get('cicloDias') || 15, prazoDias: +fd.get('prazoDias') || 0, formasPagamento: formas, formaPadrao: formas.includes(c.formaPadrao) ? c.formaPadrao : formas[0],
-        codigo: String(fd.get('codigo') || fd.get('nome')).toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10), pin: String(fd.get('pin')).slice(0, 4) });
+        codigo: cod, pin: String(fd.get('pin')).slice(0, 4) });
       if (id) c.ativo = !!fd.get('ativo');
     });
     closeModal(); toast('Parceiro salvo');
@@ -670,6 +728,31 @@ const common = {
 };
 
 delegate(app, new Proxy({}, { get: (_, k) => handlers[k] || common[k] }));
-store.subscribe((s, msg, externo) => { if (externo && msg === 'fechamento') toast('Novo fechamento recebido de um parceiro'); rerender(); });
+// Recomendações por parceiro calculadas aqui (o gestor vê toda a rede) e gravadas no cadastro,
+// para o app do parceiro sugerir novos rótulos sem acesso aos dados dos outros parceiros.
+async function aposEntrar() {
+  const s = S();
+  if (!s) return;
+  const novas = {};
+  for (const c of s.clientes.filter((x) => x.ativo)) {
+    const r = D.recomendacoes(s, c.id, 3).map((x) => x.produtoId);
+    if (JSON.stringify(r) !== JSON.stringify(c.recomendados || [])) novas[c.id] = r;
+  }
+  if (Object.keys(novas).length) store.commit((st) => { for (const [cid, r] of Object.entries(novas)) D.cliente(st, cid).recomendados = r; });
+}
+
+store.subscribe((s, msg, externo) => {
+  if (!S()) return;
+  if (externo && msg === 'fechamento') toast('Novo fechamento recebido de um parceiro');
+  if (current.pattern === '/novo-fechamento/:cid' && externo) return;
+  if (document.querySelector('.overlay') && externo) return; // não fechar formulários abertos
+  rerender();
+});
+store.onErro((m) => toast('Não foi possível salvar: ' + m));
+store.onRecuperacao(() => modal({ title: 'Criar nova senha', body: '<form id="fns" class="col"><label class="field"><span>Nova senha (mínimo 8 caracteres)</span><input class="input" name="senha" type="password" minlength="8" autocomplete="new-password"></label></form>',
+  foot: '<button class="btn" data-act="ok">Salvar senha</button>',
+  handlers: { ok: async () => { const v = new FormData(document.getElementById('fns')).get('senha'); if (String(v).length < 8) return toast('Mínimo 8 caracteres'); try { await store.novaSenha(v); closeModal(); toast('Senha alterada'); } catch (e) { toast(e.message); } } } }));
+store.onStatus(() => { const el = document.querySelector('.side .foot .sync'); if (el) el.outerHTML = syncBadge(); });
 registerSW();
-go();
+app.innerHTML = `<div class="login"><img src="${asset('assets/logo/logo_v_negativo.png')}" alt="Mil Terras" style="width:200px;opacity:.9"></div>`;
+store.init('gestor').then(async (ok) => { if (ok) await aposEntrar(); go(); });

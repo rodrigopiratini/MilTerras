@@ -1,10 +1,11 @@
 // Service worker: o app abre instantaneamente e funciona offline (cache do app + rede para fontes)
-const VERSION = 'mt-v1';
+const VERSION = 'mt-v2';
 const CORE = [
   './', 'index.html', 'gestor/', 'gestor/index.html', 'gestor/manifest.webmanifest', 'cliente/', 'cliente/index.html', 'cliente/manifest.webmanifest',
   'src/css/app.css',
   'src/js/core/fmt.js', 'src/js/core/store.js', 'src/js/core/seed.js', 'src/js/core/catalogo.js', 'src/js/core/domain.js', 'src/js/core/ui.js', 'src/js/core/charts.js', 'src/js/core/fechamento-ui.js',
-  'src/js/gestor/app.js', 'src/js/cliente/app.js',
+  'src/js/gestor/app.js', 'src/js/cliente/app.js', 'src/js/config.js', 'src/js/core/cloud.js', 'src/vendor/supabase.js',
+  'assets/logo/logo_v_negativo.png', 'assets/icons/icon-512.png', 'assets/icons/icon-cliente-512.png',
   'assets/logo/logo_h.png', 'assets/logo/logo_h_negativo.png', 'assets/logo/logo_v.png', 'assets/logo/simbolo.png', 'assets/logo/simbolo_negativo.png',
   'assets/icons/icon-192.png', 'assets/icons/icon-cliente-192.png', 'assets/icons/apple-touch-icon.png', 'assets/icons/apple-touch-icon-cliente.png',
   "assets/vinhos/amarone.webp",
