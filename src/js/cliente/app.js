@@ -10,7 +10,10 @@ import { novoWizard, renderWizard, wizardHandlers, statusBadge, ajustesHTML } fr
 const app = document.getElementById('app');
 const S = () => store.get();
 const SESSION = 'milterras:parceiro';
-const cid = () => (store.modo === 'local' ? localStorage.getItem(SESSION) : store.perfil()?.clienteId);
+// ?ver=<id>: a Gestão abre a conta do parceiro em modo visualização (somente leitura)
+const ESPELHO = new URLSearchParams(location.search).get('ver');
+const espelhoOk = () => ESPELHO && (store.modo === 'local' || store.ehGestor());
+const cid = () => (espelhoOk() ? ESPELHO : store.modo === 'local' ? localStorage.getItem(SESSION) : store.perfil()?.clienteId);
 const C = () => D.cliente(S(), cid());
 
 const NAV = [['#/inicio', 'home', 'Início'], ['#/relatorios', 'chart', 'Relatórios'], ['#/vender', 'plus', 'Vender'], ['#/fechamento', 'receipt', 'Fechamento'], ['#/mais', 'menu', 'Mais']];
@@ -33,7 +36,7 @@ function shell(title, content, { back } = {}) {
       <div class="foot"><span class="sync">Conectado à Mil Terras</span><br><a href="#" data-act="logout" style="color:#C9B3AC">Sair</a></div></aside>
     <div>
       <header class="topbar">${back ? `<button data-act="back" aria-label="Voltar">${icon('arrowL')}</button>` : `<img src="${asset('assets/logo/simbolo_negativo.png')}" alt="">`}<div class="t ellipsis">${title}</div><a style="color:#fff" target="_blank" rel="noopener" href="${waLink(S().meta.whatsapp, `Olá, Mil Terras! Aqui é do ${c.nome}.`)}" aria-label="Falar com a Mil Terras">${icon('whatsapp')}</a></header>
-      <main class="main">${content}</main></div>
+      <main class="main">${espelhoOk() ? `<div class="demo-banner">${icon('info')}<span class="grow">Você está vendo o app de <b>${esc(c.nome)}</b> como ele vê, em tempo real. <b>Somente leitura.</b></span><a href="#" data-act="fecharEspelho">Fechar</a></div>` : ''}${content}</main></div>
     <nav class="tabbar">${NAV.map(([h, ic, n]) => h === '#/vender' ? `<a href="${h}" class="fab"><span class="ic">${icon('plus')}</span></a>` : `<a href="${h}" class="${on(h) || (h === '#/mais' && ['#/carta', '#/ajustes', '#/estoque', '#/pedido'].some(on)) ? 'on' : ''}">${icon(ic)}<span>${n}</span>${b(h)}</a>`).join('')}</nav>
   </div>`;
 }
@@ -65,6 +68,7 @@ function vInicio() {
         : `<a class="btn ${dias <= 1 ? 'gold' : 'light'} block mt" href="#/fechamento/novo">${icon('receipt')} ${dias <= 1 ? 'Fazer o fechamento agora' : 'Antecipar fechamento'}</a>`}
     </div>
     ${transito.map((r) => `<div class="ins info mt"><span class="ic">${icon('truck')}</span><span class="grow"><div class="t">Reposição ${{ a_separar: 'em preparação', separado: 'separada, sai em breve', em_rota: 'a caminho' }[r.status]}</div><div class="s">${r.itens.map((i) => `${i.qtd}× ${esc(D.produto(s, i.produtoId).nome)}`).join(', ')}</div></span>${badge(D.STATUS_ENTREGA[r.status].label, D.STATUS_ENTREGA[r.status].tone)}</div>`).join('')}
+    ${Object.keys(c.filaPedido || {}).length ? `<div class="ins oportunidade mt"><span class="ic">${icon('star')}</span><span class="grow"><div class="t">Fila de pedido: ${Object.entries(c.filaPedido).map(([pid, q]) => `${q}× ${esc(D.produto(s, pid)?.nome)}`).join(', ')}</div><div class="s">Vai sugerida no próximo fechamento. Se preferir, antecipe o pedido agora.</div></span><a class="btn sm gold" href="#/pedido?fila=1">Antecipar pedido</a></div>` : ''}
     ${acabando.length ? `<div class="ins atencao mt"><span class="ic">${icon('alert')}</span><span class="grow"><div class="t">${plural(acabando.length, 'rótulo acabando', 'rótulos acabando')}</div><div class="s">${acabando.map(([pid, q]) => `${esc(D.produto(s, pid).nome)} (${q})`).join(', ')}</div></span>
       <a class="btn sm gold" href="#/pedido?p=${acabando.map(([pid]) => pid).join(',')}">Pedir</a></div>` : ''}
     <div class="grid g2 mt">
@@ -72,7 +76,7 @@ function vInicio() {
         ${rv.porProduto.length ? hbars(rv.porProduto.slice(0, 5).map((x) => ({ label: D.produto(s, x.produtoId).nome, value: x.qtd, sub: money(x.receita) + ' na carta' })), (v) => int(v) + ' gf') : empty('Nenhuma venda registrada ainda neste período.<br><a href="#/vender">Registrar a primeira</a>')}</div>
       <div class="col">
         ${topG ? `<div class="card row">${'<div class="avatar" style="background:var(--dourado);color:#fff">' + icon('star') + '</div>'}<div class="grow"><div class="label">Destaque da equipe</div><div style="font-weight:600;font-size:16px">${esc(D.garcom(c, topG.garcomId)?.nome || '—')}</div><div class="small muted">${plural(topG.qtd, 'garrafa')} · ${money0(topG.receita)} no período</div></div></div>` : ''}
-        ${ultimo ? `<a class="card row" href="#/fechamento/${ultimo.id}" style="color:inherit"><div class="avatar">${icon('receipt')}</div><div class="grow"><div class="label">Último fechamento</div><div style="font-weight:600">${money(ultimo.total)}</div><div class="small muted">${date(ultimo.inicio)} – ${date(ultimo.fim)}</div></div>${statusBadge(ultimo)}</a>` : ''}
+        ${ultimo ? `<a class="card row" href="#/fechamento/${ultimo.id}" style="color:inherit"><div class="avatar">${icon('receipt')}</div><div class="grow"><div class="label">Último fechamento</div><div style="font-weight:600">${money(ultimo.total)}</div><div class="small muted">${date(ultimo.inicio)} – ${date(ultimo.fim)}</div></div>${statusBadge(ultimo, true)}</a>` : ''}
         <a class="card row" href="#/pedido" style="color:inherit"><div class="avatar">${icon('truck')}</div><div class="grow"><div style="font-weight:600">Pedir reposição</div><div class="small muted">Veja o que a Mil Terras tem disponível e peça sem esperar o fechamento</div></div>${icon('arrowR')}</a>
         <a class="card row" href="#/carta" style="color:inherit"><div class="avatar">${icon('wine')}</div><div class="grow"><div style="font-weight:600">Qual vinho para este prato?</div><div class="small muted">Assistente de harmonização para a equipe</div></div>${icon('arrowR')}</a>
       </div>
@@ -85,12 +89,12 @@ function vVender() {
   const est = D.saldoEstimado(s, c.id);
   const saldo = D.saldoCliente(s, c.id);
   const pids = sortBy(Object.keys(saldo).filter((p) => saldo[p] > 0 || est[p] > 0), (p) => -(est[p] || 0) * 0 + (est[p] > 0 ? 0 : 1));
-  const hoje = sortBy(D.vendasCliente(s, c.id, addDays(today(), -1)), (v) => v.hora || '', true);
+  const hoje = sortBy(D.vendasCliente(s, c.id, addDays(today(), -7)), (v) => v.data + (v.hora || '') + (v.ts || ''), true).slice(0, 40);
   return shell('Registrar venda', `
     ${pageHead('Registrar venda', 'Toque no vinho vendido. Leva 3 segundos e alimenta seus relatórios.')}
     <div class="wine-grid">${pids.map((pid) => { const p = D.produto(s, pid); const q = est[pid] || 0; return `<button class="wine ${q <= 0 ? 'off' : ''}" data-act="vender" data-p="${pid}" style="font:inherit"><span class="q">${qtdBadge(q)}</span><img src="${asset(p.foto)}" alt="" loading="lazy"><div class="n">${esc(p.nome)}</div><div class="tiny muted">${money(D.precoCarta(s, c, pid))} na carta</div></button>`; }).join('')}</div>
-    <div class="card mt"><div class="head"><h2>Vendas de hoje</h2><span class="small muted">${plural(sum(hoje, (v) => v.qtd), 'garrafa')} · ${money(sum(hoje, (v) => v.qtd * v.precoCarta))}</span></div>
-      <div class="list">${hoje.map((v) => `<div class="li">${thumb(D.produto(s, v.produtoId), 'sm')}<div class="grow"><div class="t">${v.qtd}× ${esc(D.produto(s, v.produtoId).nome)}</div><div class="s">${esc(D.garcom(c, v.garcomId)?.nome || 'Sem garçom')}${v.hora ? ' · ' + v.hora : ''}</div></div><div class="num">${money(v.qtd * v.precoCarta)}</div><button class="iconbtn" data-act="desfazer" data-id="${v.id}" aria-label="Desfazer">${icon('trash')}</button></div>`).join('') || empty('Nenhuma venda hoje ainda.')}</div></div>`);
+    <div class="card mt"><div class="head"><h2>Últimas vendas</h2><span class="small muted">${plural(sum(hoje, (v) => v.qtd), 'garrafa')} · ${money(sum(hoje, (v) => v.qtd * v.precoCarta))}</span></div>
+      <div class="list">${hoje.map((v) => `<div class="li">${thumb(D.produto(s, v.produtoId), 'sm')}<div class="grow"><div class="t">${v.qtd}× ${esc(D.produto(s, v.produtoId).nome)}</div><div class="s">${esc(D.garcom(c, v.garcomId)?.nome || 'Sem garçom')} · ${v.data === today() ? 'hoje' : dateShort(v.data)}${v.hora ? ' ' + v.hora : ''}</div></div><div class="num">${money(v.qtd * v.precoCarta)}</div>${v.data >= D.periodoAtual(s, c.id).desde ? `<button class="iconbtn" data-act="desfazer" data-id="${v.id}" aria-label="Desfazer">${icon('trash')}</button>` : ''}</div>`).join('') || empty('Nenhuma venda nos últimos 7 dias.')}</div></div>`);
 }
 
 let ultimoGarcom = null;
@@ -103,6 +107,8 @@ function modalVenda(pid) {
   modal({ title: 'Registrar venda', body: `
     <div class="row">${thumb(p)}<div class="grow"><div style="font-family:var(--font-t);font-size:18px">${esc(p.nome)}</div><div class="small muted">${money(D.precoCarta(s, c, pid))} na carta · ${est} em estoque</div></div></div>
     <div class="row between mt"><span class="label">Quantidade</span>${stepper('qtd', 1, { min: 1, max: Math.max(1, est) })}</div>
+    <div class="grid g2 mt" style="gap:10px"><label class="field"><span>Data da venda</span><input class="input" type="date" name="dataVenda" value="${today()}" min="${D.periodoAtual(s, c.id).desde}" max="${today()}"></label>
+      <label class="field"><span>Hora</span><input class="input" type="time" name="horaVenda" value="${new Date().toTimeString().slice(0, 5)}"></label></div>
     <div class="label mt mb">Quem vendeu?</div>
     <div class="chips" id="gchips">${gs.map((x) => `<button type="button" class="chip ${x.id === g ? 'on' : ''}" data-act="g" data-id="${x.id}">${esc(x.nome)}</button>`).join('')}</div>
     ${est <= 0 ? `<div class="small mt" style="color:var(--warn)">${icon('alert')} O sistema não tem saldo deste vinho aqui. Confira o estoque no fechamento.</div>` : ''}`,
@@ -112,10 +118,14 @@ function modalVenda(pid) {
       g: (el) => { g = el.dataset.id; el.parentElement.querySelectorAll('.chip').forEach((b) => b.classList.toggle('on', b === el)); },
       ok: () => {
         const qtd = Math.max(1, +document.querySelector('.modal [name=qtd]').value || 1);
-        const now = new Date();
-        store.commit((st) => D.registrarVenda(st, { clienteId: c.id, produtoId: pid, qtd, garcomId: g, hora: `${now.getHours()}:${String(now.getMinutes()).padStart(2, '0')}` }), 'venda');
+        const data = document.querySelector('.modal [name=dataVenda]').value || today();
+        const min = D.periodoAtual(s, c.id).desde;
+        if (data > today()) return toast('A data não pode ser futura');
+        if (data < min) return toast(`Esse período já foi fechado. Use uma data a partir de ${date(min)}.`);
+        const hora = document.querySelector('.modal [name=horaVenda]').value || '';
+        store.commit((st) => D.registrarVenda(st, { clienteId: c.id, produtoId: pid, qtd, garcomId: g, data, hora }), 'venda');
         ultimoGarcom = g;
-        closeModal(); toast(`✓ ${qtd}× ${p.nome} registrado`);
+        closeModal(); toast(`✓ ${qtd}× ${p.nome} registrado${data !== today() ? ' em ' + date(data) : ''}`);
       },
     } });
 }
@@ -181,7 +191,7 @@ function vFechamentos() {
         <div class="row between wrap mt"><div><div class="v" style="font-family:var(--font-t);font-size:26px">${money(rv.custo)}</div><div class="small" style="color:#E3C9A2">estimado até agora · ${plural(rv.garrafas, 'garrafa lançada', 'garrafas lançadas')}</div></div>
         <a class="btn gold lg" href="#/fechamento/novo">${icon('receipt')} Fazer fechamento</a></div></div>`}
     <h2 class="mt">Histórico</h2>
-    <div class="card pad-0 mt-s"><div class="list" style="padding:0 16px">${fs.filter((f) => f.status !== 'enviado').map((f) => `<a class="li" href="#/fechamento/${f.id}"><div class="grow"><div class="t">${date(f.inicio)} – ${date(f.fim)}</div><div class="s">${plural(f.garrafas, 'garrafa')} · ${esc(f.formaPagamento)}</div></div><div class="right"><div class="num" style="font-weight:600">${money(f.total)}</div>${statusBadge(f)}</div></a>`).join('') || empty('Nenhum fechamento ainda')}</div></div>`);
+    <div class="card pad-0 mt-s"><div class="list" style="padding:0 16px">${fs.filter((f) => f.status !== 'enviado').map((f) => `<a class="li" href="#/fechamento/${f.id}"><div class="grow"><div class="t">${date(f.inicio)} – ${date(f.fim)}</div><div class="s">${plural(f.garrafas, 'garrafa')} · ${esc(f.formaPagamento)}</div></div><div class="right"><div class="num" style="font-weight:600">${money(f.total)}</div>${statusBadge(f, true)}</div></a>`).join('') || empty('Nenhum fechamento ainda')}</div></div>`);
 }
 
 function vNovoFechamento() {
@@ -203,7 +213,7 @@ function vFechamento({ id, query }) {
   const repo = f.reposicaoEnviada || f.reposicao || [];
   return shell('Fechamento', `
     ${query.enviado ? `<div class="card mb" style="background:var(--ok-bg);border-color:transparent"><div class="row">${icon('check')}<div><b>Fechamento enviado!</b><div class="small">A Mil Terras recebeu e vai conferir. A reposição sai logo após a aprovação.</div></div></div></div>` : ''}
-    <div class="pagehead"><div><div class="label">${date(f.inicio)} – ${date(f.fim)}</div><h1 style="margin-top:4px">${money(f.total)}</h1><div class="sub row gap-s">${statusBadge(f)} ${f.vencimento && f.status === 'aprovado' ? `<span>vence ${date(f.vencimento)}</span>` : ''}</div></div>
+    <div class="pagehead"><div><div class="label">${date(f.inicio)} – ${date(f.fim)}</div><h1 style="margin-top:4px">${money(f.total)}</h1><div class="sub row gap-s">${statusBadge(f, true)} ${f.vencimento && f.status === 'aprovado' ? `<span>vence ${date(f.vencimento)}</span>` : ''}</div></div>
       <div class="row">${f.status === 'aprovado' && f.formaPagamento === 'PIX' ? `<button class="btn" data-act="pix">PIX copia e cola</button>` : ''}<button class="btn ghost" data-act="print">${icon('print')} Imprimir</button></div></div>
     <div class="card pad-0"><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Vinho</th><th class="r">Saldo</th><th class="r">Contado</th><th class="r">Vendido</th><th class="r">Valor</th></tr></thead>
       <tbody>${f.itens.map((i) => `<tr><td>${esc(D.produto(s, i.produtoId).nome)}</td><td class="r">${i.saldoAnterior}</td><td class="r">${i.contagem}</td><td class="r"><b>${i.vendido}</b></td><td class="r">${money(i.valor)}</td></tr>`).join('')}</tbody>
@@ -227,7 +237,7 @@ function vCarta({ query }) {
     ${pageHead('Carta e harmonização', 'Ajude a equipe a indicar o vinho certo para cada prato')}
     <div class="label mb">O cliente vai comer…</div>
     <div class="chips mb">${Object.keys(HARMONIZA).map((k) => `<button class="chip ${prato === k ? 'on' : ''}" data-act="goto" data-h="#/carta${prato === k ? '' : '?prato=' + encodeURIComponent(k)}">${k}</button>`).join('')}</div>
-    <div class="wine-grid">${lista.map((p) => `<button class="wine ${(est[p.id] || 0) > 0 ? '' : 'off'}" data-act="ficha" data-p="${p.id}" style="font:inherit"><span class="q">${(est[p.id] || 0) > 0 ? badge('Na casa', 'ok') : badge('Pedir', '')}</span><img src="${asset(p.foto)}" alt="" loading="lazy"><div class="n">${esc(p.nome)}</div><div class="tiny muted">${p.tipo} · ${esc(p.regiao)}</div><div class="tiny serif" style="color:var(--bordo)">${esc(p.harmonizacao)}</div></button>`).join('') || empty('Nenhum rótulo para esta combinação')}</div>`);
+    <div class="wine-grid">${lista.map((p) => `<button class="wine ${(est[p.id] || 0) > 0 ? '' : 'off'}" data-act="ficha" data-p="${p.id}" style="font:inherit"><span class="q">${c.filaPedido?.[p.id] ? badge(`Na fila: ${c.filaPedido[p.id]}`, 'opp') : (est[p.id] || 0) > 0 ? badge('Na casa', 'ok') : badge('Pedir', '')}</span><img src="${asset(p.foto)}" alt="" loading="lazy"><div class="n">${esc(p.nome)}</div><div class="tiny muted">${p.tipo} · ${esc(p.regiao)}</div><div class="tiny serif" style="color:var(--bordo)">${esc(p.harmonizacao)}</div></button>`).join('') || empty('Nenhum rótulo para esta combinação')}</div>`);
 }
 
 // ---------- Mais / ajustes ----------
@@ -260,6 +270,7 @@ function vAjustes() {
 
 // ---------- Login ----------
 function vLogin() {
+  if (ESPELHO) return `<div class="login"><div class="box col center" style="gap:14px"><img class="logo" src="${asset('assets/logo/logo_v.png')}" alt="Mil Terras"><div class="small">Para ver a conta de um parceiro, entre primeiro na <b>Gestão</b> neste navegador e use o botão “Ver app” do parceiro.</div><a class="btn" href="../gestor/">Abrir Gestão</a></div></div>`;
   const s = S() || { meta: {} };
   return `<div class="login"><form class="box col" data-onsubmit="login" style="gap:14px">
     <img class="logo" src="${asset('assets/logo/logo_v.png')}" alt="Mil Terras">
@@ -275,10 +286,13 @@ function vLogin() {
 // ---------- Render ----------
 // ---------- Pedido de reposição (entre fechamentos) ----------
 let rascunho = {};
+let pedidoIniciado = false;
 function vPedido({ query }) {
   const s = S(), c = C();
   const disp = D.estoqueDisponivel(s);
   const est = D.saldoEstimado(s, c.id);
+  if ((query.fila || !query.p) && !Object.keys(rascunho).length && !pedidoIniciado) for (const [pid, q] of Object.entries(c.filaPedido || {})) rascunho[pid] = Math.min(q, disp[pid] || 0);
+  pedidoIniciado = true;
   if (query.p && !Object.keys(rascunho).length) for (const pid of query.p.split(',')) rascunho[pid] = Math.min(Math.max(1, (c.par?.[pid] || 2) - (est[pid] || 0)), disp[pid] || 0);
   const recs = D.recomendacoes(s, c.id, 3).map((r) => r.produtoId);
   const lista = sortBy(s.produtos.filter((p) => p.ativo), (p) => ((est[p.id] || 0) > 0 || c.par?.[p.id] ? 0 : recs.includes(p.id) ? 1 : 2));
@@ -335,8 +349,22 @@ const common = {
   },
   vender: (el) => modalVenda(el.dataset.p),
   desfazer: (el) => confirmar('Remover esta venda?', { ok: 'Remover' }).then((y) => y && store.commit((st) => { st.vendas = st.vendas.filter((v) => v.id !== el.dataset.id); })),
-  ficha: (el) => { const s = S(), c = C(); const p = D.produto(s, el.dataset.p); const q = D.saldoEstimado(s, c.id)[p.id] || 0;
-    modal({ title: p.tipo, wide: true, body: fichaVinho(p, `<div class="row between small"><span>Na sua carta: <b>${money(D.precoCarta(s, c, p.id))}</b></span>${q > 0 ? badge(`${q} na casa`, 'ok') : `<a class="btn sm gold" target="_blank" rel="noopener" href="${waLink(s.meta.whatsapp, `Olá, Mil Terras! Aqui é do ${c.nome}. Gostaríamos de incluir o ${p.nome} na nossa carta.`)}">Quero este rótulo</a>`}</div>`) }); },
+  ficha: (el) => {
+    const s = S(), c = C(); const p = D.produto(s, el.dataset.p); const q = D.saldoEstimado(s, c.id)[p.id] || 0;
+    const disp = Math.max(0, D.estoqueDisponivel(s)[p.id] || 0);
+    const naFila = c.filaPedido?.[p.id];
+    modal({ title: p.tipo, wide: true, body: fichaVinho(p, `<div class="row between small"><span>Na sua carta: <b>${money(D.precoCarta(s, c, p.id))}</b></span>${q > 0 ? badge(`${q} na casa`, 'ok') : ''}</div>
+      <div class="card" style="padding:12px"><div class="row between wrap"><div><div style="font-weight:600">${naFila ? `Na sua fila de pedido: ${naFila}` : q > 0 ? 'Pedir mais deste rótulo' : 'Quero este rótulo'}</div><div class="tiny muted">${disp ? `${disp} disponíveis na Mil Terras` : 'Sem estoque disponível agora'} · vai junto no próximo fechamento, ou antecipe o pedido</div></div>
+        ${disp ? `<div class="row gap-s">${stepper('fila', naFila || Math.min(2, disp), { min: 1, max: disp })}<button class="btn sm gold" data-act="addFila">${naFila ? 'Atualizar' : 'Adicionar'}</button></div>` : ''}</div></div>`),
+      handlers: { step: stepHandler, qty: () => {}, addFila: () => {
+        if (espelhoOk()) return bloqueado();
+        const n = Math.max(1, Math.min(disp, +document.querySelector('.modal [name=fila]').value || 1));
+        store.commit((st) => { const cc = D.cliente(st, c.id); cc.filaPedido = { ...(cc.filaPedido || {}), [p.id]: n }; });
+        closeModal(); toast(`${p.nome} na sua fila de pedido (${n})`);
+      } } });
+  },
+  fecharEspelho: () => { window.close(); setTimeout(() => (location.href = '../gestor/' + (store.demo ? '?demo=1' : '')), 200); },
+  limparFila: () => store.commit((st) => { D.cliente(st, cid()).filaPedido = {}; }),
   csv: (el) => { const s = S(), c = C(); const rows = [['Data', 'Hora', 'Vinho', 'Qtd', 'Garçom', 'Preço carta', 'Total']];
     for (const v of sortBy(D.vendasCliente(s, c.id, el.dataset.de), (v) => v.data)) rows.push([v.data, v.hora || '', D.produto(s, v.produtoId).nome, v.qtd, D.garcom(c, v.garcomId)?.nome || '', v.precoCarta.toFixed(2).replace('.', ','), (v.qtd * v.precoCarta).toFixed(2).replace('.', ',')]);
     download(`vendas-${c.codigo.toLowerCase()}-${today()}.csv`, toCSV(rows), 'text/csv'); },
@@ -357,15 +385,22 @@ const common = {
     const acima = itens.find((i) => i.qtd > (disp[i.produtoId] || 0));
     if (acima) return toast(`${D.produto(s, acima.produtoId).nome}: só ${disp[acima.produtoId] || 0} disponíveis`);
     const obs = document.getElementById('pedObs')?.value || '';
-    store.commit((st) => D.criarPedido(st, { clienteId: c.id, itens, obs }), 'pedido');
-    rascunho = {};
+    store.commit((st) => {
+      D.criarPedido(st, { clienteId: c.id, itens, obs });
+      const cc = D.cliente(st, c.id);
+      if (cc.filaPedido) { const f = { ...cc.filaPedido }; for (const i of itens) delete f[i.produtoId]; cc.filaPedido = f; }
+    }, 'pedido');
+    rascunho = {}; pedidoIniciado = false;
     toast('Pedido enviado para a Mil Terras');
     if (location.hash.includes('?')) location.hash = '#/pedido'; else rerender();
   },
   cancelarPedido: (el) => confirmar('Cancelar este pedido?', { ok: 'Cancelar pedido' }).then((y) => y && store.commit((st) => { st.pedidos = st.pedidos.filter((p) => p.id !== el.dataset.id); })),
 };
 
-delegate(app, new Proxy({}, { get: (_, k) => handlers[k] || common[k] }));
+// No modo visualização (Gestão vendo o app do parceiro) as ações que gravam ficam bloqueadas
+const ESCRITA = new Set(['vender', 'desfazer', 'addG', 'rmG', 'precos', 'enviarPedido', 'cancelarPedido', 'wz-send', 'wz-approve', 'limparFila', 'addFila']);
+const bloqueado = () => toast('Modo visualização: só o parceiro pode fazer alterações');
+delegate(app, new Proxy({}, { get: (_, k) => (espelhoOk() && ESCRITA.has(k) ? bloqueado : handlers[k] || common[k]) }));
 store.subscribe((s, msg, externo) => {
   if (!S() || !current.view) return; // ainda carregando
   if (document.querySelector('.overlay') && externo) return;
@@ -376,4 +411,5 @@ store.subscribe((s, msg, externo) => {
 store.onErro((m) => toast('Não foi possível salvar: ' + m));
 registerSW();
 app.innerHTML = `<div class="login"><img src="${asset('assets/logo/logo_v_negativo.png')}" alt="Mil Terras" style="width:200px;opacity:.9"></div>`;
-store.init('parceiro').then(() => go());
+if (ESPELHO) store.setSomenteLeitura(true);
+store.init(ESPELHO && store.modo === 'nuvem' ? 'gestor' : 'parceiro').then(() => go());

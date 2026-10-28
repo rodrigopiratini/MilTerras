@@ -3,7 +3,7 @@ import * as store from '../core/store.js';
 import * as D from '../core/domain.js';
 import { seed } from '../core/seed.js';
 import { money, money0, moneyK, int, percent, date, dateShort, relDays, today, addDays, diffDays, monthLabel, esc, sum, uid, plural, sortBy } from '../core/fmt.js';
-import { icon, router, delegate, modal, closeModal, confirmar, toast, kpi, badge, empty, thumb, stepper, stepHandler, insightCard, fichaVinho, iniciais, qtdBadge, waLink, download, toCSV, asset, instalar, registerSW, moneyInput, parseMoney } from '../core/ui.js';
+import { icon, router, delegate, modal, closeModal, confirmar, toast, kpi, badge, empty, thumb, stepper, stepHandler, insightCard, fichaVinho, iniciais, qtdBadge, waLink, download, toCSV, asset, instalar, registerSW, moneyInput, parseMoney, filtrarBusca, buscaInput } from '../core/ui.js';
 import { chart, mountCharts, resetCharts, legend, hbars } from '../core/charts.js';
 import { novoWizard, renderWizard, wizardHandlers, statusBadge, ajustesHTML } from '../core/fechamento-ui.js';
 
@@ -13,6 +13,7 @@ const SESSION = 'milterras:gestor';
 
 const NAV = [
   ['#/painel', 'chart', 'Painel'],
+  ['#/aovivo', 'clock', 'Ao vivo'],
   ['#/estoque', 'box', 'Estoque central'],
   ['#/consignacao', 'swap', 'Consignação'],
   ['#/remessas', 'truck', 'Remessas'],
@@ -55,6 +56,11 @@ function syncBadge() {
   const t = { local: store.demo && S().meta.demo ? 'Demonstração (dados locais)' : 'Dados neste navegador', online: 'Sincronizado', enviando: `Enviando ${store.pendentes()}…`, offline: `Sem internet · ${store.pendentes()} pendente(s)` }[st] || st;
   return `<span class="sync" style="${st === 'offline' ? 'color:var(--warn)' : st === 'local' ? 'color:var(--dourado)' : ''}">${t}</span>`;
 }
+const buscas = {};
+const busca = (ph) => buscaInput(buscas[current.pattern] || '', ph);
+// Link para abrir o app do parceiro em modo visualização (somente leitura)
+const urlApp = (cid) => { const u = new URL('../cliente/', location.href); u.searchParams.set('ver', cid); if (store.modo === 'local' && store.demo) u.searchParams.set('demo', '1'); return u.href; };
+const verApp = (cid, cls = 'btn ghost sm') => `<a class="${cls}" target="_blank" rel="noopener" href="${urlApp(cid)}" title="Ver o app do parceiro como ele vê">${icon('link')} Ver app</a>`;
 const pageHead = (title, sub = '', actions = '') => `<div class="pagehead"><div><h1>${title}</h1>${sub ? `<div class="sub">${sub}</div>` : ''}</div><div class="row wrap">${actions}</div></div>`;
 
 // Garrafas em consignação por parceiro (clique abre o detalhamento editável)
@@ -66,7 +72,7 @@ function graficoParceiros(s) {
     return { c, q: sum(Object.values(m)), custo: sum(Object.entries(m), ([pid, q]) => q * cm[pid]), venda: sum(Object.entries(m), ([pid, q]) => q * D.produto(s, pid).preco) };
   }).sort((a, b) => b.q - a.q);
   if (!itens.length) return empty('Cadastre o primeiro parceiro.', 'store');
-  return hbars(itens.map((x) => ({ label: x.c.nome, value: x.q, sub: `${money0(x.custo)} a custo · ${money0(x.venda)} a preço de venda<br>Clique para ver e editar`, attrs: `data-act="consigDet" data-c="${x.c.id}"` })), (v) => int(v) + ' gf', { color: 'var(--dourado)' });
+  return hbars(itens.map((x) => ({ label: x.c.nome, value: x.q, vtxt: `${int(x.q)} gf · ${moneyK(x.custo)}`, sub: `${money0(x.custo)} a custo · ${money0(x.venda)} a preço de venda<br>Clique para ver e editar`, attrs: `data-act="consigDet" data-c="${x.c.id}" data-busca="${esc(x.c.nome + ' ' + x.c.cidade)}"` })), (v) => int(v) + ' gf', { color: 'var(--dourado)' });
 }
 
 // Detalhamento do consignado de um parceiro, com edição das quantidades
@@ -94,7 +100,7 @@ function modalConsig(cid) {
       <div class="field" id="stEntrega"><span>Status da remessa (se houver aumento)</span><select class="input" name="status">${Object.entries(D.STATUS_ENTREGA).map(([k, v]) => `<option value="${k}" ${k === 'entregue' ? 'selected' : ''}>${v.label}</option>`).join('')}</select></div>
       <label class="field"><span>Justificativa (obrigatória se alterar)</span><input class="input" name="motivo" maxlength="200" placeholder="Ex.: contagem na visita de 28/10"></label>
     </form>`,
-    foot: `<a class="btn ghost" href="#/parceiro/${cid}?tab=estoque" data-act="close">Abrir parceiro</a><button class="btn" data-act="ok">Salvar alterações</button>`,
+    foot: `${verApp(cid, 'btn ghost')}<a class="btn ghost" href="#/parceiro/${cid}?tab=estoque" data-act="close">Abrir parceiro</a><button class="btn" data-act="ok">Salvar alterações</button>`,
     handlers: {
       step: stepHandler, qty: () => {},
       close: (el) => { closeModal(); if (el.getAttribute?.('href')) location.hash = el.getAttribute('href'); },
@@ -148,6 +154,7 @@ function vPainel() {
 
   return shell('Painel', `
     ${s.meta.demo ? `<div class="demo-banner">${icon('info')} <span class="grow">Catálogo e preços reais da Mil Terras. Parceiros e movimentações são <b>fictícios</b>, simulados para demonstrar os painéis.</span><a href="#/config">Começar do zero</a></div>` : ''}
+    ${(() => { const h = D.resumoRede(s, today()); return `<a class="card row mb" href="#/aovivo" style="color:inherit;padding:12px 16px"><span class="live small" style="font-weight:600">Ao vivo</span><span class="grow small ink2">Hoje os parceiros já registraram <b>${plural(h.garrafas, 'garrafa')}</b> · ${money0(h.valor)} a faturar · ${h.porCliente.length} parceiro(s) vendendo</span>${icon('arrowR')}</a>`; })()}
     ${pageHead(`Olá, ${s.meta.empresa}`, new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' }), `<a class="btn ghost" href="#/consignacao?nova=1">${icon('truck')} Nova remessa</a><a class="btn" href="#/estoque?entrada=1">${icon('plus')} Entrada</a>`)}
     <div class="grid g4">
       ${kpi('Faturamento do mês', moneyK(mes.receita), `Projeção ${moneyK(projecao)} · <b class="${delta >= 0 ? 'up' : 'down'}">${delta >= 0 ? '▲' : '▼'} ${percent(Math.abs(delta))}</b> vs ${monthLabel(ant.mes)}`)}
@@ -183,6 +190,46 @@ function vPainel() {
   `);
 }
 
+// ---------- Ao vivo: vendas registradas pelos parceiros ----------
+function periodoAoVivo(k) {
+  const t = today();
+  const dow = new Date().getDay(); // 0 = domingo
+  if (k === 'ontem') return [addDays(t, -1), addDays(t, -1), 'Ontem'];
+  if (k === '7d') return [addDays(t, -6), t, 'Últimos 7 dias'];
+  if (k === 'fds') { const sexta = addDays(t, -((dow + 2) % 7)); return [sexta, addDays(sexta, 2) > t ? t : addDays(sexta, 2), 'Fim de semana (sex–dom)']; }
+  if (k === 'mes') return [t.slice(0, 8) + '01', t, 'Este mês'];
+  return [t, t, 'Hoje'];
+}
+
+function vAoVivo({ query }) {
+  const s = S();
+  const k = query.p || 'hoje';
+  const [de, ate, nome] = periodoAoVivo(k);
+  const r = D.resumoRede(s, de, ate);
+  const ativos = s.clientes.filter((c) => c.ativo);
+  const umDia = de === ate;
+  const serie = umDia
+    ? Array.from({ length: 14 }, (_, i) => i + 11).map((h) => ({ label: `${h}h`, value: r.porHora[h % 24] || 0 }))
+    : (() => { const out = []; for (let d = de; d <= ate; d = addDays(d, 1)) out.push({ label: dateShort(d), value: r.porDia[d] || 0 }); return out; })();
+  const semVenda = ativos.filter((c) => !r.porCliente.some((x) => x.clienteId === c.id));
+  return shell('Ao vivo', `
+    ${pageHead(`<span class="live"></span>Ao vivo · ${nome}`, `Vendas registradas pelos parceiros no app${umDia ? ' · ' + date(de) : ` · ${date(de)} a ${date(ate)}`}. Atualiza sozinho.`, busca('Buscar parceiro, rótulo, garçom…'))}
+    <div class="seg mb" style="max-width:100%;overflow-x:auto">${[['hoje', 'Hoje'], ['ontem', 'Ontem'], ['fds', 'Fim de semana'], ['7d', '7 dias'], ['mes', 'Este mês']].map(([v, n]) => `<button class="${k === v ? 'on' : ''}" data-act="goto" data-h="#/aovivo?p=${v}">${n}</button>`).join('')}</div>
+    <div class="grid g4">
+      ${kpi('Garrafas vendidas', int(r.garrafas), `${r.vendas.length} lançamentos`)}
+      ${kpi('Valor Mil Terras', money0(r.valor), 'a preço de tabela (a faturar no fechamento)')}
+      ${kpi('Receita dos parceiros', money0(r.receita), 'pelos preços de carta')}
+      ${kpi('Parceiros com venda', `${r.porCliente.length} de ${ativos.length}`, semVenda.length && semVenda.length <= 4 ? 'sem venda: ' + semVenda.map((c) => esc(c.nome)).join(', ') : semVenda.length ? `${semVenda.length} sem venda no período` : 'todos venderam')}
+    </div>
+    <div class="card mt"><div class="head"><h2>${umDia ? 'Garrafas por hora' : 'Garrafas por dia'}</h2></div>${chart({ type: 'columns', height: 200, data: serie, fmt: (v) => int(v) + ' gf', padL: 36 })}</div>
+    <div class="grid g2 mt">
+      <div class="card"><div class="head"><h2>Por parceiro</h2><span class="muted small">clique para ver o app dele</span></div>${r.porCliente.length ? hbars(r.porCliente.map((x) => { const c = D.cliente(s, x.clienteId); return { label: c?.nome || '—', value: x.valor, vtxt: `${x.qtd} gf · ${moneyK(x.valor)}`, sub: `Receita na carta: ${money0(x.receita)}`, attrs: `data-act="abrirApp" data-c="${x.clienteId}" data-busca="${esc(c?.nome || '')}"` }; }), money0, { color: 'var(--dourado)' }) : empty('Nenhuma venda registrada no período.')}</div>
+      <div class="card"><div class="head"><h2>Rótulos mais vendidos</h2></div>${r.porProduto.length ? hbars(r.porProduto.map((x) => ({ label: D.produto(s, x.produtoId)?.nome, value: x.qtd, vtxt: `${x.qtd} gf · ${moneyK(x.valor)}`, attrs: `data-busca="${esc(D.produto(s, x.produtoId)?.nome)}"` })), (v) => int(v) + ' gf') : empty('—')}</div>
+    </div>
+    <div class="card pad-0 mt"><div style="padding:16px 16px 0"><h2>Últimas vendas</h2></div><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Quando</th><th>Parceiro</th><th>Rótulo</th><th class="hide-m">Garçom</th><th class="r">Qtd.</th><th class="r">Valor</th></tr></thead>
+      <tbody>${r.vendas.slice(0, 60).map((v) => { const c = D.cliente(s, v.clienteId); const p = D.produto(s, v.produtoId); const g = D.garcom(c, v.garcomId)?.nome || '—'; return `<tr data-busca="${esc(`${c?.nome} ${p?.nome} ${g}`)}"><td style="white-space:nowrap">${v.data === today() ? 'hoje' : dateShort(v.data)} ${v.hora || ''}</td><td>${esc(c?.nome || '—')}</td><td>${esc(p?.nome || '—')}</td><td class="hide-m">${esc(g)}</td><td class="r">${v.qtd}</td><td class="r">${money(v.qtd * v.preco)}</td></tr>`; }).join('') || `<tr><td colspan="6">${empty('Sem vendas no período')}</td></tr>`}</tbody></table></div></div>`);
+}
+
 // ---------- Estoque central ----------
 function vEstoque({ query }) {
   const s = S();
@@ -192,14 +239,14 @@ function vEstoque({ query }) {
   const cmv = D.custosMedios(s);
   const totG = sum(cob, (x) => Math.max(0, x.estoque)), totC = sum(cob, (x) => Math.max(0, x.estoque) * cmv[x.produto.id]);
   return shell('Estoque central', `
-    ${pageHead('Estoque central', `${plural(totG, 'garrafa')} · <b>${money(totC)}</b> a custo · ${money0(sum(cob, (x) => Math.max(0, x.estoque) * x.produto.preco))} a preço de tabela`, `<button class="btn ghost" data-act="mov" data-t="ajuste">${icon('swap')} Ajuste</button><button class="btn ghost" data-act="mov" data-t="venda_direta">${icon('money')} Venda direta</button><button class="btn" data-act="mov" data-t="entrada">${icon('plus')} Entrada</button>`)}
+    ${pageHead('Estoque central', `${plural(totG, 'garrafa')} · <b>${money(totC)}</b> a custo · ${money0(sum(cob, (x) => Math.max(0, x.estoque) * x.produto.preco))} a preço de tabela`, `${busca('Buscar rótulo…')}<button class="btn ghost" data-act="mov" data-t="ajuste">${icon('swap')} Ajuste</button><button class="btn ghost" data-act="mov" data-t="venda_direta">${icon('money')} Venda direta</button><button class="btn" data-act="mov" data-t="entrada">${icon('plus')} Entrada</button>`)}
     <div class="card pad-0"><div class="tbl-wrap"><table class="tbl">
       <thead><tr><th>Rótulo</th><th class="r">Saldo</th><th class="r hide-m">Mínimo</th><th class="r hide-m">Giro/mês</th><th class="r">Cobertura</th><th class="r hide-m">Custo médio</th><th class="r hide-m">Valor a custo</th></tr></thead>
       <tfoot><tr><td>Total</td><td class="r">${int(totG)}</td><td class="hide-m"></td><td class="hide-m"></td><td></td><td class="hide-m"></td><td class="r hide-m">${money0(totC)}</td></tr></tfoot>
       <tbody>${sortBy(cob, (x) => x.dias).map((x) => {
         const p = x.produto; const cm = cmv[p.id];
         const tone = x.estoque <= 0 ? 'crit' : x.dias < 20 ? 'crit' : x.dias < 45 || x.estoque < p.estoqueMin ? 'warn' : 'ok';
-        return `<tr class="click" data-act="goto" data-h="#/produto/${p.id}"><td><div class="row">${thumb(p, 'sm')}<div><div style="font-weight:500">${esc(p.nome)}</div><div class="tiny muted">${p.tipo} · ${esc(p.regiao)}</div></div></div></td>
+        return `<tr class="click" data-act="goto" data-h="#/produto/${p.id}" data-busca="${esc(p.nome + ' ' + p.tipo + ' ' + p.regiao + ' ' + p.uvas)}"><td><div class="row">${thumb(p, 'sm')}<div><div style="font-weight:500">${esc(p.nome)}</div><div class="tiny muted">${p.tipo} · ${esc(p.regiao)}</div></div></div></td>
           <td class="r"><b>${int(x.estoque)}</b></td><td class="r hide-m">${p.estoqueMin}</td><td class="r hide-m">${(x.giro * 30).toFixed(0)}</td>
           <td class="r">${badge(x.estoque <= 0 ? 'Esgotado' : x.dias === Infinity ? 'Sem giro' : Math.floor(x.dias) + ' dias', tone)}</td>
           <td class="r hide-m">${money(cm)}</td><td class="r hide-m">${money0(Math.max(0, x.estoque) * cm)}</td></tr>`;
@@ -207,7 +254,7 @@ function vEstoque({ query }) {
     <div class="tiny muted mt-s">Cobertura = saldo ÷ giro médio dos últimos 60 dias (vendas apuradas + vendas diretas). Alerta abaixo de 45 dias, tempo médio de uma importação.</div>
     <h2 class="mt">Movimentações recentes</h2>
     <div class="card pad-0 mt-s"><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Data</th><th>Tipo</th><th>Rótulo</th><th class="hide-m">Parceiro / obs.</th><th class="r">Qtd.</th></tr></thead>
-      <tbody>${movs.map((m) => { const f = D.TIPOS_MOV[m.tipo].central; return `<tr><td>${dateShort(m.data)}</td><td>${badge(D.TIPOS_MOV[m.tipo].label.split(' (')[0], m.tipo === 'entrada' ? 'ok' : m.tipo === 'remessa' ? 'info' : m.tipo === 'perda' ? 'crit' : '')}</td>
+      <tbody>${movs.map((m) => { const f = D.TIPOS_MOV[m.tipo].central; return `<tr data-busca="${esc(D.produto(s, m.produtoId).nome + ' ' + (m.clienteId ? D.cliente(s, m.clienteId)?.nome : '') + ' ' + (m.obs || '') + ' ' + D.TIPOS_MOV[m.tipo].label)}"><td>${dateShort(m.data)}</td><td>${badge(D.TIPOS_MOV[m.tipo].label.split(' (')[0], m.tipo === 'entrada' ? 'ok' : m.tipo === 'remessa' ? 'info' : m.tipo === 'perda' ? 'crit' : '')}</td>
         <td>${esc(D.produto(s, m.produtoId).nome)}</td><td class="hide-m small muted">${esc(m.clienteId ? D.cliente(s, m.clienteId).nome : m.obs || '')}</td><td class="r"><b class="${f * Math.sign(m.qtd) > 0 ? 'up' : 'down'}">${f * m.qtd > 0 ? '+' : ''}${f * m.qtd}</b></td></tr>`; }).join('')}</tbody></table></div></div>
   `);
 }
@@ -269,12 +316,12 @@ function vConsignacao({ query }) {
   const cm = D.custosMedios(s);
   const cus = (c) => sum(Object.entries(cons[c.id] || {}), ([pid, q]) => q * cm[pid]);
   return shell('Consignação', `
-    ${pageHead('Estoque em terceiros', `${plural(sum(cls, tot), 'garrafa')} em consignação · <b>${money0(sum(cls, cus))}</b> a custo · ${money0(sum(cls, val))} a preço de tabela`, `<button class="btn ghost" data-act="devolucao">${icon('swap')} Recolher</button><button class="btn" data-act="remessa">${icon('truck')} Nova remessa</button>`)}
+    ${pageHead('Estoque em terceiros', `${plural(sum(cls, tot), 'garrafa')} em consignação · <b>${money0(sum(cls, cus))}</b> a custo · ${money0(sum(cls, val))} a preço de tabela`, `${busca('Buscar parceiro…')}<button class="btn ghost" data-act="devolucao">${icon('swap')} Recolher</button><button class="btn" data-act="remessa">${icon('truck')} Nova remessa</button>`)}
     <div class="card"><div class="head"><h2>Garrafas por parceiro</h2><span class="muted small">clique para detalhar e editar</span></div>${graficoParceiros(s)}</div>
     <h2 class="mt">Mapa da consignação</h2>
-    <div class="card pad-0 mt-s"><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Parceiro</th>${prods.map((p) => `<th class="r" title="${esc(p.nome)}">${esc(p.nome.split(' ')[0])}</th>`).join('')}<th class="r">Total</th></tr></thead>
-      <tbody>${cls.map((c) => `<tr class="click" data-act="goto" data-h="#/parceiro/${c.id}"><td style="white-space:nowrap">${esc(c.nome)}</td>${prods.map((p) => { const q = cons[c.id]?.[p.id] || 0; return `<td class="r ${q ? '' : 'muted'}">${q || '·'}</td>`; }).join('')}<td class="r"><b>${tot(c)}</b></td></tr>`).join('')}</tbody>
-      <tfoot><tr><td>Total</td>${prods.map((p) => `<td class="r">${sum(cls, (c) => cons[c.id]?.[p.id] || 0)}</td>`).join('')}<td class="r">${sum(cls, tot)}</td></tr></tfoot></table></div></div>
+    <div class="card pad-0 mt-s"><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Parceiro</th><th class="r">Garrafas</th><th class="r">A custo</th><th class="r">A venda</th>${prods.map((p) => `<th class="r" title="${esc(p.nome)}">${esc(p.nome.split(' ')[0])}</th>`).join('')}</tr></thead>
+      <tbody>${cls.map((c) => `<tr class="click" data-act="consigDet" data-c="${c.id}" data-busca="${esc(c.nome + ' ' + c.cidade)}"><td style="white-space:nowrap">${esc(c.nome)}</td><td class="r"><b>${tot(c)}</b></td><td class="r" style="white-space:nowrap">${money0(cus(c))}</td><td class="r" style="white-space:nowrap">${money0(val(c))}</td>${prods.map((p) => { const q = cons[c.id]?.[p.id] || 0; return `<td class="r ${q ? '' : 'muted'}">${q || '·'}</td>`; }).join('')}</tr>`).join('')}</tbody>
+      <tfoot><tr><td>Total</td><td class="r">${sum(cls, tot)}</td><td class="r" style="white-space:nowrap">${money0(sum(cls, cus))}</td><td class="r" style="white-space:nowrap">${money0(sum(cls, val))}</td>${prods.map((p) => `<td class="r">${sum(cls, (c) => cons[c.id]?.[p.id] || 0)}</td>`).join('')}</tr></tfoot></table></div></div>
   `);
 }
 
@@ -328,7 +375,7 @@ function vRemessas({ query }) {
     const c = D.cliente(s, r.clienteId);
     const st = D.STATUS_ENTREGA[r.status];
     const dias = diffDays(today(), r.data);
-    return `<div class="card kcard">
+    return `<div class="card kcard" data-busca="${esc((c?.nome || '') + ' ' + r.itens.map((i) => D.produto(s, i.produtoId)?.nome).join(' '))}">
       <div class="row between"><b class="ellipsis">${esc(c?.nome || '—')}</b>${r.status !== 'entregue' && dias >= 2 ? badge(`${dias}d`, 'warn') : ''}</div>
       <div class="tiny muted">${date(r.data)} · ${r.ref?.startsWith('pd') ? 'pedido do parceiro' : r.ref ? 'reposição de fechamento' : esc(r.obs || 'remessa manual')}</div>
       <div class="small mt-s">${r.itens.map((i) => `${i.qtd}× ${esc(D.produto(s, i.produtoId).nome)}`).join('<br>')}</div>
@@ -342,7 +389,7 @@ function vRemessas({ query }) {
   };
   const peds = D.pedidos(s).filter((p) => p.status === 'solicitado');
   const fechs = s.fechamentos.filter((f) => f.status === 'enviado' && (f.reposicao || []).length);
-  const cardSol = (titulo, sub, itens, acoes) => `<div class="card kcard"><b class="ellipsis">${titulo}</b><div class="tiny muted">${sub}</div>
+  const cardSol = (titulo, sub, itens, acoes) => `<div class="card kcard" data-busca="${esc(titulo + ' ' + itens.map((i) => D.produto(s, i.produtoId)?.nome).join(' '))}"><b class="ellipsis">${titulo}</b><div class="tiny muted">${sub}</div>
       <div class="small mt-s">${itens.map((i) => `${i.qtd}× ${esc(D.produto(s, i.produtoId)?.nome)}`).join('<br>')}</div>
       <div class="mt-s"><b>${plural(sum(itens, (i) => i.qtd), 'garrafa')} · ${money(D.valorItens(s, itens))}</b></div><div class="row wrap gap-s mt-s">${acoes}</div></div>`;
   const solicitado = [
@@ -353,7 +400,7 @@ function vRemessas({ query }) {
   ];
   const totSol = [...peds.flatMap((p) => p.itens), ...fechs.flatMap((f) => f.reposicao)];
   return shell('Remessas', `
-    ${pageHead('Remessas', 'Pedidos, separação e entrega das garrafas aos parceiros', `<button class="btn" data-act="remessa">${icon('plus')} Nova remessa</button>`)}
+    ${pageHead('Remessas', 'Pedidos, separação e entrega das garrafas aos parceiros', `${busca('Buscar parceiro ou rótulo…')}<button class="btn" data-act="remessa">${icon('plus')} Nova remessa</button>`)}
     <div class="kanban k5"><div class="kcol"><div class="khead">${badge('Solicitado', 'warn')}<span class="small muted">${money0(D.valorItens(s, totSol))}</span></div>${solicitado.join('') || '<div class="empty small">Nenhum pedido</div>'}</div>${cols.map((k) => { const xs = k === 'entregue' ? entregues : todas.filter((r) => r.status === k); return `<div class="kcol"><div class="khead">${badge(D.STATUS_ENTREGA[k].label, D.STATUS_ENTREGA[k].tone)}<span class="small muted">${k === 'entregue' ? 'recentes' : `${plural(sum(xs, (r) => r.garrafas), 'garrafa')} · ${money0(sum(xs, (r) => r.valor))}`}</span></div>
       ${xs.map(card).join('') || '<div class="empty small">Nada aqui</div>'}
       ${k === 'entregue' && todas.filter((r) => r.status === 'entregue').length > entregues.length ? `<button class="btn ghost sm block" data-act="goto" data-h="#/remessas?mais=${entregues.length + 20}">Ver mais</button>` : ''}</div>`; }).join('')}</div>
@@ -365,12 +412,12 @@ function vParceiros() {
   const s = S();
   const rank = D.rankingClientes(s, 90);
   return shell('Parceiros', `
-    ${pageHead('Parceiros', `${s.clientes.filter((c) => c.ativo).length} estabelecimentos ativos`, `<button class="btn" data-act="editCliente">${icon('plus')} Novo parceiro</button>`)}
-    <div class="card pad-0"><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Parceiro</th><th class="hide-m">Cidade</th><th class="r">Receita 90d</th><th class="r hide-m">Garrafas 90d</th><th class="r hide-m">Consignado</th><th class="r hide-m">Giro</th><th>Próx. fechamento</th></tr></thead>
-    <tbody>${rank.map((x) => { const c = x.cliente; const per = D.periodoAtual(s, c.id); return `<tr class="click" data-act="goto" data-h="#/parceiro/${c.id}">
+    ${pageHead('Parceiros', `${s.clientes.filter((c) => c.ativo).length} estabelecimentos ativos`, `${busca('Buscar parceiro…')}<button class="btn" data-act="editCliente">${icon('plus')} Novo parceiro</button>`)}
+    <div class="card pad-0"><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Parceiro</th><th class="hide-m">Cidade</th><th class="r">Receita 90d</th><th class="r hide-m">Garrafas 90d</th><th class="r hide-m">Consignado</th><th class="r hide-m">Giro</th><th>Próx. fechamento</th><th></th></tr></thead>
+    <tbody>${rank.map((x) => { const c = x.cliente; const per = D.periodoAtual(s, c.id); return `<tr class="click" data-act="goto" data-h="#/parceiro/${c.id}" data-busca="${esc(c.nome + ' ' + c.cidade + ' ' + c.codigo + ' ' + (c.contato || ''))}">
       <td><div class="row"><div class="avatar">${iniciais(c.nome)}</div><div><div style="font-weight:500">${esc(c.nome)}</div><div class="tiny muted">${c.tipo} · desde ${date(c.desde)}</div></div></div></td>
       <td class="hide-m">${esc(c.cidade)}</td><td class="r"><b>${money0(x.receita)}</b></td><td class="r hide-m">${x.garrafas}</td><td class="r hide-m">${x.garrafasConsig} gf · ${moneyK(x.emConsig)}</td><td class="r hide-m">${x.giro.toFixed(1)}×</td>
-      <td>${per.pendente ? badge('Enviado — conferir', 'warn') : badge(date(per.previsto), per.previsto < today() ? 'crit' : '')}</td></tr>`; }).join('')}</tbody></table></div></div>
+      <td>${per.pendente ? badge('Enviado — conferir', 'warn') : badge(date(per.previsto), per.previsto < today() ? 'crit' : '')}</td><td class="r" onclick="event.stopPropagation()">${verApp(c.id)}</td></tr>`; }).join('')}</tbody></table></div></div>
     <div class="tiny muted mt-s">Giro = garrafas vendidas em 90 dias ÷ garrafas hoje em consignação. Quanto maior, melhor o retorno do estoque deixado no parceiro.</div>
   `);
 }
@@ -431,7 +478,7 @@ function vParceiro({ id, query }) {
   if (tab === 'cadastro') body = formCliente(c);
   return shell(c.nome, `
     <div class="pagehead"><div class="row"><div class="avatar" style="width:52px;height:52px;font-size:18px">${iniciais(c.nome)}</div><div><h1>${esc(c.nome)}</h1><div class="sub">${c.tipo} · ${esc(c.cidade)} · ${esc(c.contato)} · ${esc(c.telefone)}</div></div></div>
-      <div class="row wrap"><a class="btn ghost" target="_blank" rel="noopener" href="${waLink(c.telefone, `Olá ${c.contato.split(' ')[0]}, tudo bem? Aqui é da Mil Terras.`)}">${icon('whatsapp')} WhatsApp</a><a class="btn" href="#/novo-fechamento/${c.id}">${icon('receipt')} Fechamento</a></div></div>
+      <div class="row wrap"><a class="btn ghost" target="_blank" rel="noopener" href="${waLink(c.telefone, `Olá ${c.contato.split(' ')[0]}, tudo bem? Aqui é da Mil Terras.`)}">${icon('whatsapp')} WhatsApp</a>${verApp(c.id, 'btn ghost')}<a class="btn" href="#/novo-fechamento/${c.id}">${icon('receipt')} Fechamento</a></div></div>
     <div class="seg mb" style="overflow-x:auto;max-width:100%">${tabs.map(([k, n]) => `<button class="${tab === k ? 'on' : ''}" data-act="goto" data-h="#/parceiro/${id}?tab=${k}">${n}</button>`).join('')}</div>
     ${body}`, { back: true });
 }
@@ -473,7 +520,7 @@ function formCliente(c = {}) {
 function tabelaFechamentos(s, fs, comCliente = false) {
   if (!fs.length) return empty('Nenhum fechamento', 'receipt');
   return `<div class="card pad-0"><div class="tbl-wrap"><table class="tbl"><thead><tr>${comCliente ? '<th>Parceiro</th>' : ''}<th>Período</th><th class="r">Garrafas</th><th class="r">Valor</th><th class="hide-m">Pagamento</th><th>Status</th></tr></thead>
-    <tbody>${fs.map((f) => `<tr class="click" data-act="goto" data-h="#/fechamento/${f.id}">${comCliente ? `<td>${esc(D.cliente(s, f.clienteId).nome)}</td>` : ''}<td style="white-space:nowrap">${dateShort(f.inicio)} – ${dateShort(f.fim)}</td><td class="r">${f.garrafas}</td><td class="r"><b>${money(f.total)}</b></td><td class="hide-m small">${esc(f.formaPagamento || '')}${f.vencimento && f.status === 'aprovado' ? ` · vence ${dateShort(f.vencimento)}` : ''}</td><td>${statusBadge(f)} ${f.ajustes ? badge(`${f.ajustes} ajuste${f.ajustes > 1 ? 's' : ''}`, 'warn') : ''}</td></tr>`).join('')}</tbody></table></div></div>`;
+    <tbody>${fs.map((f) => `<tr class="click" data-act="goto" data-h="#/fechamento/${f.id}" data-busca="${esc(D.cliente(s, f.clienteId)?.nome + ' ' + (f.formaPagamento || '') + ' ' + D.STATUS_FECH[f.status].label + ' ' + date(f.fim))}">${comCliente ? `<td>${esc(D.cliente(s, f.clienteId).nome)}</td>` : ''}<td style="white-space:nowrap">${dateShort(f.inicio)} – ${dateShort(f.fim)}</td><td class="r">${f.garrafas}</td><td class="r"><b>${money(f.total)}</b></td><td class="hide-m small">${esc(f.formaPagamento || '')}${f.vencimento && f.status === 'aprovado' ? ` · vence ${dateShort(f.vencimento)}` : ''}</td><td>${statusBadge(f)} ${f.ajustes ? badge(`${f.ajustes} ajuste${f.ajustes > 1 ? 's' : ''}`, 'warn') : ''}</td></tr>`).join('')}</tbody></table></div></div>`;
 }
 
 function vFechamentos({ query }) {
@@ -483,7 +530,7 @@ function vFechamentos({ query }) {
   const fs = filtro === 'todos' ? all : all.filter((f) => f.status === filtro);
   const n = (st) => s.fechamentos.filter((f) => f.status === st).length;
   return shell('Fechamentos', `
-    ${pageHead('Fechamentos', 'Acertos periódicos com os parceiros', `<button class="btn" data-act="novoFech">${icon('plus')} Fazer fechamento</button>`)}
+    ${pageHead('Fechamentos', 'Acertos periódicos com os parceiros', `${busca('Buscar parceiro…')}<button class="btn" data-act="novoFech">${icon('plus')} Fazer fechamento</button>`)}
     <div class="seg mb">${[['todos', 'Todos'], ['enviado', `Para conferir (${n('enviado')})`], ['aprovado', `A receber (${n('aprovado')})`], ['pago', 'Pagos']].map(([k, l]) => `<button class="${filtro === k ? 'on' : ''}" data-act="goto" data-h="#/fechamentos?f=${k}">${l}</button>`).join('')}</div>
     ${tabelaFechamentos(s, fs.slice(0, 80), true)}`);
 }
@@ -544,9 +591,9 @@ function vFinanceiro({ query }) {
   const s = S();
   const mes = query.mes || today().slice(0, 7);
   const b = D.balancoMes(s, mes);
-  const linha = (n, v, forte, neg) => `<tr><td style="${forte ? 'font-weight:600' : ''}">${n}</td><td class="r" style="white-space:nowrap;${forte ? 'font-weight:600' : ''}${v < 0 ? ';color:var(--crit)' : ''}">${neg && v ? '− ' : ''}${money(Math.abs(v))}</td></tr>`;
+  const linha = (n, v, forte, neg) => `<tr><td style="${forte ? 'font-weight:600' : ''}">${n}</td><td class="r" style="white-space:nowrap;${forte ? 'font-weight:600' : ''}${v < 0 ? ';color:var(--crit)' : ''}">${(neg && v) || v < 0 ? '− ' : ''}${money(Math.abs(v))}</td></tr>`;
   return shell('Financeiro', `
-    ${pageHead('Financeiro', 'Balanço mensal de receitas e despesas', `${segFin('mes')}<button class="btn ghost" data-act="csvMes" data-m="${mes}">${icon('download')} CSV do mês</button><button class="btn" data-act="despesa">${icon('plus')} Despesa</button>`)}
+    ${pageHead('Financeiro', 'Balanço mensal de receitas e despesas', `${segFin('mes')}${busca('Buscar lançamento…')}<button class="btn ghost" data-act="csvMes" data-m="${mes}">${icon('download')} CSV do mês</button><button class="btn" data-act="despesa">${icon('plus')} Despesa</button>`)}
     <div class="row between mb"><button class="btn ghost sm" data-act="goto" data-h="#/financeiro?mes=${mesMais(mes, -1)}">${icon('arrowL')} ${nomeMes(mesMais(mes, -1))}</button>
       <h2>${nomeMes(mes)}</h2>
       <button class="btn ghost sm" data-act="goto" data-h="#/financeiro?mes=${mesMais(mes, 1)}" ${mes >= today().slice(0, 7) ? 'disabled' : ''}>${nomeMes(mesMais(mes, 1))} ${icon('arrowR')}</button></div>
@@ -577,9 +624,9 @@ function vFinanceiro({ query }) {
     </div>
     <div class="grid g2 mt">
       <div class="card pad-0"><div style="padding:16px 16px 0" class="row between"><h2>Recebimentos</h2><b class="small">${money(b.recebido)}</b></div>
-        <div class="list" style="padding:0 16px">${b.recebimentos.map((r) => `<${r.link ? `a href="${r.link}"` : 'div'} class="li"><div class="grow"><div class="t">${esc(r.descricao)}</div><div class="s">${date(r.data)}${r.forma ? ' · ' + esc(r.forma) : ''}</div></div><div class="num up">${money(r.valor)}</div></${r.link ? 'a' : 'div'}>`).join('') || empty('Nenhum recebimento', 'money')}</div></div>
+        <div class="list" style="padding:0 16px">${b.recebimentos.map((r) => `<${r.link ? `a href="${r.link}"` : 'div'} class="li" data-busca="${esc(r.descricao + ' ' + (r.forma || ''))}"><div class="grow"><div class="t">${esc(r.descricao)}</div><div class="s">${date(r.data)}${r.forma ? ' · ' + esc(r.forma) : ''}</div></div><div class="num up">${money(r.valor)}</div></${r.link ? 'a' : 'div'}>`).join('') || empty('Nenhum recebimento', 'money')}</div></div>
       <div class="card pad-0"><div style="padding:16px 16px 0" class="row between"><h2>Despesas</h2><b class="small">${money(b.operacionais + b.compras)}</b></div>
-        <div class="list" style="padding:0 16px">${b.despesas.map((d) => `<div class="li"><div class="grow"><div class="t">${esc(d.descricao)}</div><div class="s">${esc(d.categoria)} · ${date(d.data)}</div></div><div class="num down">${money(d.valor)}</div><button class="iconbtn" data-act="delDesp" data-id="${d.id}" aria-label="Excluir">${icon('trash')}</button></div>`).join('') || empty('Nenhuma despesa', 'money')}</div></div>
+        <div class="list" style="padding:0 16px">${b.despesas.map((d) => `<div class="li" data-busca="${esc(d.descricao + ' ' + d.categoria)}"><div class="grow"><div class="t">${esc(d.descricao)}</div><div class="s">${esc(d.categoria)} · ${date(d.data)}</div></div><div class="num down">${money(d.valor)}</div><button class="iconbtn" data-act="delDesp" data-id="${d.id}" aria-label="Excluir">${icon('trash')}</button></div>`).join('') || empty('Nenhuma despesa', 'money')}</div></div>
     </div>`);
 }
 
@@ -617,7 +664,7 @@ function vInteligencia() {
   const rank = D.rankingClientes(s);
   const grupos = [['acao', 'Ações pendentes'], ['critico', 'Crítico'], ['atencao', 'Atenção'], ['oportunidade', 'Oportunidades de venda'], ['info', 'Para acompanhar']];
   return shell('Inteligência', `
-    ${pageHead('Inteligência', 'Alertas automáticos, curva ABC e sugestões para decidir mais rápido')}
+    ${pageHead('Inteligência', 'Alertas automáticos, curva ABC e sugestões para decidir mais rápido', busca('Buscar alerta…'))}
     <div class="grid g-2-1">
       <div class="col">${grupos.map(([k, n]) => { const xs = ins.filter((i) => i.nivel === k); return xs.length ? `<div><div class="label mb" style="margin-top:6px">${n} · ${xs.length}</div><div class="col">${xs.map(insightCard).join('')}</div></div>` : ''; }).join('')}</div>
       <div class="col">
@@ -636,8 +683,8 @@ function vProdutos() {
   const est = D.estoqueCentral(s);
   const cons = D.consignado(s);
   return shell('Rótulos', `
-    ${pageHead('Rótulos', `${s.produtos.length} vinhos no catálogo · preços da Tabela Mil Terras`, `<button class="btn" data-act="editProduto">${icon('plus')} Novo rótulo</button>`)}
-    <div class="wine-grid">${s.produtos.map((p) => `<a class="wine ${p.ativo ? '' : 'off'}" href="#/produto/${p.id}"><span class="q">${qtdBadge(est[p.id])}</span><img src="${asset(p.foto)}" alt="" loading="lazy"><div class="n">${esc(p.nome)}</div><div class="tiny muted">${p.tipo} · ${esc(p.regiao)} · ${p.safra}</div><div style="font-weight:600;color:var(--bordo)">${money(p.preco)}</div><div class="tiny muted">${sum(Object.values(cons), (m) => m[p.id] || 0)} em consignação</div></a>`).join('')}</div>`);
+    ${pageHead('Rótulos', `${s.produtos.length} vinhos no catálogo · preços da Tabela Mil Terras`, `${busca('Buscar rótulo…')}<button class="btn" data-act="editProduto">${icon('plus')} Novo rótulo</button>`)}
+    <div class="wine-grid">${s.produtos.map((p) => `<a class="wine ${p.ativo ? '' : 'off'}" href="#/produto/${p.id}" data-busca="${esc(p.nome + ' ' + p.tipo + ' ' + p.regiao + ' ' + p.uvas)}"><span class="q">${qtdBadge(est[p.id])}</span><img src="${asset(p.foto)}" alt="" loading="lazy"><div class="n">${esc(p.nome)}</div><div class="tiny muted">${p.tipo} · ${esc(p.regiao)} · ${p.safra}</div><div style="font-weight:600;color:var(--bordo)">${money(p.preco)}</div><div class="tiny muted">${sum(Object.values(cons), (m) => m[p.id] || 0)} em consignação</div></a>`).join('')}</div>`);
 }
 
 function vProduto({ id }) {
@@ -711,7 +758,7 @@ function vConfig() {
     ${pageHead('Configurações')}
     <div class="grid g2">
       <div class="card col"><h2>Acesso dos parceiros</h2><div class="small ink2">Cada parceiro entra no app <b>Mil Terras Parceiro</b> com o código do estabelecimento e um PIN. Envie o link pelo WhatsApp. Trocar o PIN (no cadastro do parceiro) desconecta os aparelhos dele.</div>
-        <div class="list">${s.clientes.filter((c) => c.ativo).map((c) => `<div class="li"><div class="grow"><div class="t">${esc(c.nome)}</div><div class="s">Código <b>${esc(c.codigo)}</b> · PIN <b>${esc(c.pin)}</b></div></div><div class="row gap-s"><a class="btn ghost sm" target="_blank" rel="noopener" href="${waLink(c.telefone, msgAcesso(c, base))}">${icon('whatsapp')} WhatsApp</a>${c.email ? `<a class="btn ghost sm" href="${mailAcesso(c, base)}">E-mail</a>` : ''}<button class="btn ghost sm" data-act="copiarAcesso" data-c="${c.id}">Copiar</button></div></div>`).join('') || empty('Nenhum parceiro cadastrado ainda', 'store')}</div>
+        <div class="list">${s.clientes.filter((c) => c.ativo).map((c) => `<div class="li"><div class="grow"><div class="t">${esc(c.nome)}</div><div class="s">Código <b>${esc(c.codigo)}</b> · PIN <b>${esc(c.pin)}</b></div></div><div class="row gap-s"><a class="btn ghost sm" target="_blank" rel="noopener" href="${waLink(c.telefone, msgAcesso(c, base))}">${icon('whatsapp')} WhatsApp</a>${c.email ? `<a class="btn ghost sm" href="${mailAcesso(c, base)}">E-mail</a>` : ''}<button class="btn ghost sm" data-act="copiarAcesso" data-c="${c.id}">Copiar</button>${verApp(c.id)}</div></div>`).join('') || empty('Nenhum parceiro cadastrado ainda', 'store')}</div>
         <a class="btn ghost" href="${base}" target="_blank" rel="noopener">${icon('link')} Abrir app do parceiro</a></div>
       <div class="col">
         ${nuvem ? `<div class="card col"><h2>Equipe de gestão</h2><div id="equipe" class="small muted">Carregando…</div>
@@ -770,13 +817,25 @@ function vImprimirRomaneio({ cid, query }) {
   const rid = query?.r || ult[0]?.remessaId;
   const remessa = rid ? ult.filter((m) => m.remessaId === rid) : ult.filter((m) => m.data === ult[0]?.data && !m.remessaId);
   const data = remessa[0]?.data;
-  const itens = Object.entries(saldo).filter(([, q]) => q > 0);
+  // mesmo rótulo em mais de uma linha (lançamentos antigos) é somado
+  const agrupar = (pares) => Object.entries(pares.reduce((m, [pid, q]) => ((m[pid] = (m[pid] || 0) + q), m), {})).filter(([, q]) => q > 0);
+  const itensRem = agrupar(remessa.map((m) => [m.produtoId, m.qtd]));
+  const itensSaldo = agrupar(Object.entries(saldo));
+  const tot = (its) => ({ q: sum(its, ([, q]) => q), v: sum(its, ([pid, q]) => q * D.produto(s, pid).preco) });
+  const tR = tot(itensRem), tS = tot(itensSaldo);
+  const st = remessa[0]?.entrega && remessa[0].entrega !== 'entregue' ? remessa[0].entrega : null;
+  const tabela = (its, t) => `<table class="tbl"><thead><tr><th>Rótulo</th><th class="r">Qtd.</th><th class="r">Preço un.</th><th class="r">Valor</th></tr></thead>
+    <tbody>${sortBy(its, ([pid]) => D.produto(s, pid).nome).map(([pid, q]) => { const p = D.produto(s, pid); return `<tr><td>${esc(p.nome)}</td><td class="r">${q}</td><td class="r">${money(p.preco)}</td><td class="r">${money(q * p.preco)}</td></tr>`; }).join('')}</tbody>
+    <tfoot><tr><td>Total</td><td class="r">${t.q}</td><td></td><td class="r">${money(t.v)}</td></tr></tfoot></table>`;
   return shell('Romaneio', `${docHead('Romaneio de consignação', esc(c.nome))}
-    <p class="small">Os vinhos abaixo permanecem de propriedade da <b>Mil Terras</b> e ficam em consignação no estabelecimento. O parceiro paga somente o que vender, no acerto a cada ${c.cicloDias} dias.</p>
-    ${remessa.length ? `<h3>Remessa de ${date(data)}</h3><table class="tbl mt-s"><thead><tr><th>Rótulo</th><th class="r">Qtd.</th><th class="r">Preço un.</th><th class="r">Valor</th></tr></thead><tbody>${remessa.map((m) => { const p = D.produto(s, m.produtoId); return `<tr><td>${esc(p.nome)}</td><td class="r">${m.qtd}</td><td class="r">${money(p.preco)}</td><td class="r">${money(m.qtd * p.preco)}</td></tr>`; }).join('')}</tbody></table>` : ''}
-    <h3 class="mt">Saldo total em consignação</h3><table class="tbl mt-s"><thead><tr><th>Rótulo</th><th class="r">Qtd.</th><th class="r">Preço un.</th><th class="r">Valor</th></tr></thead>
-    <tbody>${itens.map(([pid, q]) => { const p = D.produto(s, pid); return `<tr><td>${esc(p.nome)}</td><td class="r">${q}</td><td class="r">${money(p.preco)}</td><td class="r">${money(q * p.preco)}</td></tr>`; }).join('')}</tbody>
-    <tfoot><tr><td>Total</td><td class="r">${sum(itens, ([, q]) => q)}</td><td></td><td class="r">${money(sum(itens, ([pid, q]) => q * D.produto(s, pid).preco))}</td></tr></tfoot></table>
+    <div class="resumo small">
+      <div>Esta remessa${data ? ` · ${date(data)}` : ''}<b>${plural(tR.q, 'garrafa')} · ${money(tR.v)}</b></div>
+      <div>Saldo em consignação<b>${plural(tS.q, 'garrafa')} · ${money(tS.v)}</b></div>
+      <div>Parceiro<b style="font-size:14px">${esc(c.nome)}</b>${esc(c.cidade || '')}${c.contato ? ' · ' + esc(c.contato) : ''}</div>
+    </div>
+    <p class="small">Os vinhos abaixo permanecem de propriedade da <b>Mil Terras</b> e ficam em consignação no estabelecimento. O parceiro paga somente o que vender, no acerto a cada ${c.cicloDias} dias. Valores pelo preço de tabela.</p>
+    ${itensRem.length ? `<div class="bloco"><h3><span>1. Itens desta remessa</span><span>${data ? date(data) : ''}${st ? ' · ' + D.STATUS_ENTREGA[st].label : ''}</span></h3>${tabela(itensRem, tR)}</div>` : ''}
+    <div class="bloco"><h3><span>${itensRem.length ? '2. ' : ''}Saldo total em consignação após a entrega</span><span>${plural(tS.q + (st ? tR.q : 0), 'garrafa')}</span></h3>${tabela(st ? agrupar([...itensSaldo, ...itensRem]) : itensSaldo, st ? tot(agrupar([...itensSaldo, ...itensRem])) : tS)}</div>
     <div class="sign"><div>Mil Terras</div><div>${esc(c.nome)} — recebido em ___/___/______</div></div>${docFoot()}`, { back: true });
 }
 
@@ -808,7 +867,7 @@ function vLogin() {
 
 // ---------- Render ----------
 const ROUTES = [
-  ['/painel', vPainel], ['/estoque', vEstoque], ['/consignacao', vConsignacao], ['/remessas', vRemessas], ['/parceiros', vParceiros], ['/parceiro/:id', vParceiro],
+  ['/painel', vPainel], ['/aovivo', vAoVivo], ['/estoque', vEstoque], ['/consignacao', vConsignacao], ['/remessas', vRemessas], ['/parceiros', vParceiros], ['/parceiro/:id', vParceiro],
   ['/fechamentos', vFechamentos], ['/fechamento/:id', vFechamento], ['/novo-fechamento/:cid', vNovoFechamento], ['/financeiro', vFinanceiro],
   ['/inteligencia', vInteligencia], ['/produtos', vProdutos], ['/produto/:id', vProduto], ['/config', vConfig], ['/mais', vMais],
   ['/imprimir/fechamento/:id', vImprimirFechamento], ['/imprimir/romaneio/:cid', vImprimirRomaneio],
@@ -821,6 +880,7 @@ function render(view, params, pattern) {
   const logged = store.modo === 'local' ? localStorage.getItem(SESSION) : store.ehGestor() && S();
   if (!logged && store.modo === 'nuvem' && store.perfil()) telaLogin = 'ativar';
   app.innerHTML = logged ? view(params) : vLogin();
+  if (logged && buscas[pattern]) filtrarBusca(app, buscas[pattern]);
   if (logged && pattern === '/config' && store.modo === 'nuvem') carregarEquipe();
   mountCharts(app);
   if (!logged) app.querySelector('[name=p0]')?.focus();
@@ -830,6 +890,7 @@ const go = router(ROUTES, render);
 
 const common = {
   goto: (el) => (location.hash = el.dataset.h),
+  busca: (el) => { buscas[current.pattern] = el.value; filtrarBusca(app, el.value); },
   step: stepHandler,
   qty: () => {},
   back: () => history.length > 1 ? history.back() : (location.hash = '#/painel'),
@@ -964,6 +1025,7 @@ const common = {
   removerGestor: (el) => confirmar(`Remover o acesso de <b>${el.dataset.e}</b> à Gestão?`, { ok: 'Remover' }).then(async (y) => { if (!y) return; try { await store.rpc('remover_gestor', { p_user: el.dataset.u }); toast('Acesso removido'); carregarEquipe(); } catch (e) { toast(e.message); } }),
   cancelarConvite: (el) => store.rpc('cancelar_convite', { p_codigo: el.dataset.c }).then(() => { toast('Convite cancelado'); carregarEquipe(); }).catch((e) => toast(e.message)),
   consigDet: (el) => modalConsig(el.dataset.c),
+  abrirApp: (el) => window.open(urlApp(el.dataset.c), '_blank', 'noopener'),
   novoCodigo: (el) => {
     const inp = el.parentElement.querySelector('input');
     const editando = el.closest('form')?.dataset.id;

@@ -307,3 +307,14 @@ a.li, .li.click { color: inherit; cursor: pointer; }
 .li.off { opacity: .55; }
 .kanban.k5 { grid-template-columns: repeat(5, minmax(230px, 1fr)); }
 @media (max-width: 900px) { .kanban.k5 { grid-template-columns: repeat(5, 82vw); } }
+.busca { width: 230px; max-width: 100%; }
+.busca .input { padding-top: 9px; padding-bottom: 9px; }
+@media (max-width: 640px) { .busca { width: 100%; } }
+.live::before { content: ''; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--crit); margin-right: 6px; animation: pulse 1.6s infinite; vertical-align: 1px; }
+@keyframes pulse { 50% { opacity: .25; } }
+.doc .resumo { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 6px 0 18px; }
+.doc .resumo div { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+.doc .resumo b { display: block; font-size: 17px; color: var(--bordo); margin-top: 2px; }
+.doc .bloco { border: 1px solid var(--line); border-radius: 8px; margin-top: 14px; overflow: hidden; break-inside: avoid; }
+.doc .bloco h3 { background: var(--creme); padding: 9px 12px; font-size: 14px; display: flex; justify-content: space-between; }
+.doc .bloco .tbl th { background: #fff; }

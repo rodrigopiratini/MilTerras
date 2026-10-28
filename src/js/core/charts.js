@@ -98,7 +98,7 @@ export const legend = (items) => `<div class="legend">${items.map(([n, c]) => `<
 export function hbars(items, fmt = String, { color = 'var(--bordo)', max } = {}) {
   const m = max ?? Math.max(...items.map((i) => i.value), 1);
   return `<div class="hbars">${items.map((i) => `<div class="hb ${i.attrs ? 'click' : ''}" ${i.attrs || ''} data-tip="${esc(`<b>${i.label}</b><br>${fmt(i.value)}${i.sub ? '<br>' + i.sub : ''}`)}">
-    <div class="ellipsis">${i.html || esc(i.label)}</div><div class="bar-t"><i style="width:${(100 * i.value) / m}%;background:${i.color || color}"></i></div><div class="v">${fmt(i.value)}</div></div>`).join('')}</div>`;
+    <div class="ellipsis">${i.html || esc(i.label)}</div><div class="bar-t"><i style="width:${(100 * i.value) / m}%;background:${i.color || color}"></i></div><div class="v">${i.vtxt ?? fmt(i.value)}</div></div>`).join('')}</div>`;
 }
 
 // Mapa de calor (sequencial, um só matiz) — ex.: garçom × rótulo

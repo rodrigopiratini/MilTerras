@@ -18,7 +18,7 @@ export const TIPOS_MOV = {
 export const STATUS_FECH = {
   rascunho: { label: 'Rascunho', tone: 'muted' },
   enviado: { label: 'Aguardando conferência', tone: 'warn' },
-  aprovado: { label: 'A receber', tone: 'info' },
+  aprovado: { label: 'A receber', labelParceiro: 'A pagar', tone: 'info' },
   pago: { label: 'Pago', tone: 'ok' },
 };
 
@@ -149,7 +149,7 @@ export function periodoAtual(s, cid) {
   // marco: vendas do mesmo dia só entram no período se foram lançadas depois do fechamento (ts)
   const ref = pend || ult;
   const marco = ref ? { data: ref.fim, ts: ref.ts ?? Infinity } : { data: c.desde, ts: 0 };
-  return { inicio, marco, desde: ref ? addDays(inicio, 1) : inicio, previsto: addDays(inicio, c.cicloDias), pendente: pend, ultimo: ult };
+  return { inicio, marco, desde: ref ? (ref.ts ? ref.fim : addDays(inicio, 1)) : inicio, previsto: addDays(inicio, c.cicloDias), pendente: pend, ultimo: ult };
 }
 
 // de: data 'YYYY-MM-DD' (exclusiva) ou o marco de um período { data, ts }
@@ -367,6 +367,26 @@ export function balancoMes(s, mes) {
     recebido, pago: compras + operacionais, saldoCaixa: recebido - compras - operacionais, garrafas: sum(vendas, (v) => v.qtd),
     despesas: [...despesas].sort((a, b) => (a.data < b.data ? -1 : 1)), recebimentos, porParceiro, porCategoria,
     aReceber: sum(contasReceber(s).filter((f) => (f.vencimento || '').startsWith(mes)), (f) => f.total) };
+}
+
+// Vendas registradas por todos os parceiros num intervalo (acompanhamento em tempo real)
+export function resumoRede(s, de, ate = today()) {
+  const vs = s.vendas.filter((v) => v.data >= de && v.data <= ate);
+  const porCliente = {}, porProduto = {}, porDia = {}, porHora = {};
+  for (const v of vs) {
+    const c = (porCliente[v.clienteId] ||= { clienteId: v.clienteId, qtd: 0, receita: 0, valor: 0 });
+    c.qtd += v.qtd; c.receita += v.qtd * v.precoCarta; c.valor += v.qtd * v.preco;
+    const p = (porProduto[v.produtoId] ||= { produtoId: v.produtoId, qtd: 0, valor: 0 });
+    p.qtd += v.qtd; p.valor += v.qtd * v.preco;
+    porDia[v.data] = (porDia[v.data] || 0) + v.qtd;
+    const h = (v.hora || '').split(':')[0];
+    if (h) porHora[+h] = (porHora[+h] || 0) + v.qtd;
+  }
+  return {
+    vendas: [...vs].sort((a, b) => ((b.ts || 0) - (a.ts || 0)) || (b.data + (b.hora || '')).localeCompare(a.data + (a.hora || ''))),
+    garrafas: sum(vs, (v) => v.qtd), receita: sum(vs, (v) => v.qtd * v.precoCarta), valor: sum(vs, (v) => v.qtd * v.preco),
+    porCliente: Object.values(porCliente).sort((a, b) => b.valor - a.valor), porProduto: Object.values(porProduto).sort((a, b) => b.qtd - a.qtd), porDia, porHora,
+  };
 }
 
 // Consumo diário total de cada rótulo (todos os parceiros + vendas diretas) nos últimos N dias

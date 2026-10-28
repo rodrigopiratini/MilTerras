@@ -59,12 +59,13 @@ export function renderWizard(s, w, { modo = 'cliente' } = {}) {
     if (!w.repo) {
       const sug = D.sugestaoReposicao(s, w.cid, w.contagem);
       w.repo = Object.fromEntries(Object.entries(sug).map(([pid, x]) => [pid, Math.min(x.qtd, Math.max(0, disp[pid] || 0))]));
+      for (const [pid, q] of Object.entries(c.filaPedido || {})) w.repo[pid] = Math.min(Math.max(w.repo[pid] || 0, q), Math.max(0, disp[pid] || 0)); // fila de pedido do parceiro
       w.sug = sug;
       w.recs = D.recomendacoes(s, w.cid, 3).map((r) => r.produtoId);
     }
     const atuais = Object.keys(w.sug);
     const novos = s.produtos.filter((p) => p.ativo && !atuais.includes(p.id)).sort((a, b) => (w.recs.includes(b.id) ? 1 : 0) - (w.recs.includes(a.id) ? 1 : 0));
-    const line = (p, sub) => { const d = Math.max(0, disp[p.id] || 0); return `<div class="li ${d ? '' : 'off'}">${thumb(p, 'sm')}<div class="grow"><div class="t">${esc(p.nome)}</div><div class="s">${sub}</div><div class="s" style="color:${d ? 'var(--ok)' : 'var(--crit)'}">${d ? `${d} disponíveis na Mil Terras` : 'Sem estoque disponível no momento'}</div></div>${stepper('repo:' + p.id, Math.min(w.repo[p.id] || 0, d), { max: d })}</div>`; };
+    const line = (p, sub) => { const d = Math.max(0, disp[p.id] || 0); return `<div class="li ${d ? '' : 'off'}">${thumb(p, 'sm')}<div class="grow"><div class="t">${esc(p.nome)} ${c.filaPedido?.[p.id] ? badge('Da sua fila', 'opp') : ''}</div><div class="s">${sub}</div><div class="s" style="color:${d ? 'var(--ok)' : 'var(--crit)'}">${d ? `${d} disponíveis na Mil Terras` : 'Sem estoque disponível no momento'}</div></div>${stepper('repo:' + p.id, Math.min(w.repo[p.id] || 0, d), { max: d })}</div>`; };
     body = `<p class="small ink2" style="margin-top:0">${icon('spark', '')} Sugerimos quantidades pelo ritmo de vendas de cada rótulo na sua casa (garrafas para os próximos ${c.cicloDias} dias, com margem de segurança). Ajuste à vontade, ou deixe em zero para não repor.</p>
     <div class="card pad-0"><div class="list" style="padding:0 14px">${atuais.map((pid) => {
       const p = D.produto(s, pid); const x = w.sug[pid];
@@ -127,13 +128,15 @@ export function wizardHandlers(w, rerender, commit, onDone, modo = 'cliente', to
     commit((s) => {
       f = D.montarFechamento(s, w.cid, { contagem: w.contagem, reposicao: w.repo || {}, forma: w.forma, obs: w.obs, criadoPor: modo, esperado: w.esperado, justificativas: w.just });
       D.enviarFechamento(s, f);
+      const cl = D.cliente(s, w.cid);
+      if (cl.filaPedido) { const fila = { ...cl.filaPedido }; for (const r of f.reposicao) delete fila[r.produtoId]; cl.filaPedido = fila; }
       if (aprovar) f.avisos = D.aprovarFechamento(s, f.id);
     }, 'fechamento');
     onDone(f, aprovar);
   }
 }
 
-export const statusBadge = (f) => badge(D.STATUS_FECH[f.status].label + (f.status === 'aprovado' && f.vencimento < today() ? ' · vencido' : ''), f.status === 'aprovado' && f.vencimento < today() ? 'crit' : D.STATUS_FECH[f.status].tone);
+export const statusBadge = (f, parceiro = false) => badge(((parceiro && D.STATUS_FECH[f.status].labelParceiro) || D.STATUS_FECH[f.status].label) + (f.status === 'aprovado' && f.vencimento < today() ? ' · vencido' : ''), f.status === 'aprovado' && f.vencimento < today() ? 'crit' : D.STATUS_FECH[f.status].tone);
 
 // Lista de ajustes de contagem com justificativa (Gestão e Parceiro)
 export function ajustesHTML(s, f) {

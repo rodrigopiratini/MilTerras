@@ -53,7 +53,10 @@ export function get() {
 }
 
 // Aplica uma alteração e avisa as telas (e os outros aparelhos / abas)
+let somenteLeitura = false;
+export const setSomenteLeitura = (v) => { somenteLeitura = v; };
 export function commit(mutator, msg) {
+  if (somenteLeitura) { erroHook?.('modo visualização — alterações desativadas'); return; }
   const s = get();
   mutator(s);
   if (modo === 'nuvem') { nuvem.registrarMudancas(); avisar(msg); return; }

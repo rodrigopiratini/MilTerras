@@ -146,7 +146,7 @@ export function stepHandler(el) {
   inp.dispatchEvent(new Event('change', { bubbles: true }));
 }
 
-export const insightCard = (i) => `<a class="ins ${i.nivel}" href="${i.link || '#'}"><span class="ic">${icon(i.icone)}</span><span class="grow"><div class="t">${esc(i.titulo)}</div><div class="s">${esc(i.texto)}</div></span>${i.valor ? `<span class="num small" style="font-weight:600">${money(i.valor)}</span>` : ''}</a>`;
+export const insightCard = (i) => `<a class="ins ${i.nivel}" href="${i.link || '#'}" data-busca="${esc(i.titulo + ' ' + i.texto)}"><span class="ic">${icon(i.icone)}</span><span class="grow"><div class="t">${esc(i.titulo)}</div><div class="s">${esc(i.texto)}</div></span>${i.valor ? `<span class="num small" style="font-weight:600">${money(i.valor)}</span>` : ''}</a>`;
 
 export const fichaVinho = (p, extra = '') => `
   <div class="row top gap-l" style="align-items:flex-start">
@@ -163,6 +163,14 @@ export const fichaVinho = (p, extra = '') => `
       ${extra}
     </div>
   </div>`;
+
+// Busca digitada: esconde elementos [data-busca] que não contêm o termo (sem acento/maiúscula)
+export const normalizar = (t) => String(t || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+export function filtrarBusca(root, termo) {
+  const t = normalizar(termo).trim();
+  root.querySelectorAll('[data-busca]').forEach((el) => el.classList.toggle('hide', !!t && !normalizar(el.dataset.busca).includes(t)));
+}
+export const buscaInput = (valor = '', ph = 'Buscar…') => `<label class="search busca">${icon('search')}<input class="input" type="search" placeholder="${ph}" data-oninput="busca" value="${esc(valor)}" autocomplete="off"></label>`;
 
 export const iniciais = (n) => n.split(' ').map((x) => x[0]).slice(0, 2).join('').toUpperCase();
 export const qtdBadge = (q) => `<span class="badge ${q <= 0 ? 'crit' : q <= 2 ? 'warn' : ''}">${int(q)} un.</span>`;

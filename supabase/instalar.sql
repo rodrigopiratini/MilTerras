@@ -146,14 +146,15 @@ do $$ declare t text; begin
   end loop;
 end $$;
 
--- Parceiro só pode alterar equipe e preços de carta no próprio cadastro
+-- Parceiro só pode alterar equipe, preços de carta e a fila de pedido no próprio cadastro
 create or replace function public.proteger_cliente() returns trigger
 language plpgsql security definer set search_path = public as $$
 begin
   if not public.eh_gestor() then
     new.data := old.data
       || jsonb_build_object('garcons', coalesce(new.data->'garcons', old.data->'garcons'),
-                            'precosCarta', coalesce(new.data->'precosCarta', old.data->'precosCarta'));
+                            'precosCarta', coalesce(new.data->'precosCarta', old.data->'precosCarta'),
+                            'filaPedido', coalesce(new.data->'filaPedido', '{}'::jsonb));
   elsif (new.data->>'pin') is distinct from (old.data->>'pin')
      or (new.data->>'codigo') is distinct from (old.data->>'codigo')
      or coalesce((new.data->>'ativo')::boolean, true) = false then

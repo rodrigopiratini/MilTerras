@@ -1,5 +1,5 @@
 // Service worker: o app abre instantaneamente e funciona offline (cache do app + rede para fontes)
-const VERSION = 'mt-v6';
+const VERSION = 'mt-v7';
 const CORE = [
   './', 'index.html', 'gestor/', 'gestor/index.html', 'gestor/manifest.webmanifest', 'cliente/', 'cliente/index.html', 'cliente/manifest.webmanifest',
   'src/css/app.css',
