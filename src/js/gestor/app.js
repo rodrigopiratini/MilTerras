@@ -755,4 +755,12 @@ store.onRecuperacao(() => modal({ title: 'Criar nova senha', body: '<form id="fn
 store.onStatus(() => { const el = document.querySelector('.side .foot .sync'); if (el) el.outerHTML = syncBadge(); });
 registerSW();
 app.innerHTML = `<div class="login"><img src="${asset('assets/logo/logo_v_negativo.png')}" alt="Mil Terras" style="width:200px;opacity:.9"></div>`;
-store.init('gestor').then(async (ok) => { if (ok) await aposEntrar(); go(); });
+// Retorno de link de e-mail com erro (ex.: link expirado): mostra explicação em vez de uma tela quebrada
+const erroLink = new URLSearchParams(location.hash.replace(/^#\/?/, '')).get('error_code');
+if (erroLink) history.replaceState(null, '', location.pathname + location.search);
+store.init('gestor').then(async (ok) => {
+  if (ok) await aposEntrar();
+  go();
+  if (erroLink) modal({ title: 'Link inválido ou expirado', body: `<p class="small">O link do e-mail já foi usado ou expirou${erroLink === 'otp_expired' ? ' (alguns provedores de e-mail abrem o link antes de você para verificar segurança)' : ''}.</p>
+    <p class="small">Tente <b>entrar</b> com seu e-mail e senha: se a confirmação tiver funcionado, você entra normalmente. Se aparecer "Confirme o e-mail", use <b>Primeiro acesso</b> de novo para receber outro link.</p>` });
+});
