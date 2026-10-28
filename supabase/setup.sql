@@ -69,6 +69,15 @@ create table if not exists public.fechamentos (
 );
 create index if not exists fechamentos_cliente_idx on public.fechamentos (cliente_id);
 
+create table if not exists public.pedidos (            -- pedidos de reposição feitos pelo parceiro entre fechamentos
+  id text primary key,
+  data jsonb not null,
+  cliente_id text generated always as (data->>'clienteId') stored,
+  status text generated always as (data->>'status') stored,
+  updated_at timestamptz not null default now()
+);
+create index if not exists pedidos_cliente_idx on public.pedidos (cliente_id);
+
 create table if not exists public.despesas (
   id text primary key,
   data jsonb not null,
@@ -131,7 +140,7 @@ create or replace function public.tocar_updated_at() returns trigger language pl
 $$ begin new.updated_at := now(); return new; end $$;
 
 do $$ declare t text; begin
-  foreach t in array array['config','produtos','clientes','movs','vendas','fechamentos','despesas'] loop
+  foreach t in array array['config','produtos','clientes','movs','vendas','fechamentos','pedidos','despesas'] loop
     execute format('drop trigger if exists tg_updated_at on public.%I', t);
     execute format('create trigger tg_updated_at before update on public.%I for each row execute function public.tocar_updated_at()', t);
   end loop;
@@ -172,6 +181,44 @@ begin
 end $$;
 drop trigger if exists tg_proteger_fechamento on public.fechamentos;
 create trigger tg_proteger_fechamento before insert on public.fechamentos for each row execute function public.proteger_fechamento();
+
+-- Estoque disponível para pedidos: saldo central menos o que já foi solicitado e ainda não aprovado.
+-- Os parceiros enxergam só este número (não as movimentações nem os custos).
+create or replace function public.estoque_disponivel() returns json
+language sql stable security definer set search_path = public as $$
+  with central as (
+    select data->>'produtoId' pid, sum(case data->>'tipo'
+      when 'entrada' then (data->>'qtd')::int when 'devolucao' then (data->>'qtd')::int when 'ajuste' then (data->>'qtd')::int
+      when 'remessa' then -(data->>'qtd')::int when 'venda_direta' then -(data->>'qtd')::int when 'perda' then -(data->>'qtd')::int
+      else 0 end) q
+    from public.movs group by 1
+  ), reservado as (
+    select i->>'produtoId' pid, sum((i->>'qtd')::int) q from public.pedidos p, jsonb_array_elements(p.data->'itens') i where p.status = 'solicitado' group by 1
+    union all
+    select i->>'produtoId', sum((i->>'qtd')::int) from public.fechamentos f, jsonb_array_elements(coalesce(f.data->'reposicao', '[]'::jsonb)) i where f.status = 'enviado' group by 1
+  )
+  select coalesce(json_object_agg(p.id, greatest(0, coalesce(c.q, 0) - coalesce((select sum(r.q) from reservado r where r.pid = p.id), 0))), '{}'::json)
+  from public.produtos p left join central c on c.pid = p.id
+  where auth.uid() is not null and (public.eh_gestor() or public.meu_cliente() is not null)
+$$;
+
+-- Parceiro: pedido só do próprio estabelecimento, como "solicitado" e dentro do disponível
+create or replace function public.proteger_pedido() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare v_disp json; v_item jsonb;
+begin
+  if public.eh_gestor() then return new; end if;
+  if new.data->>'status' <> 'solicitado' or new.data->>'clienteId' <> public.meu_cliente() then raise exception 'Pedido inválido'; end if;
+  v_disp := public.estoque_disponivel();
+  for v_item in select * from jsonb_array_elements(new.data->'itens') loop
+    if (v_item->>'qtd')::int > coalesce((v_disp->>(v_item->>'produtoId'))::int, 0) then
+      raise exception 'Quantidade acima do estoque disponível';
+    end if;
+  end loop;
+  return new;
+end $$;
+drop trigger if exists tg_proteger_pedido on public.pedidos;
+create trigger tg_proteger_pedido before insert on public.pedidos for each row execute function public.proteger_pedido();
 
 -- ---------- Acesso ----------
 -- Parceiro: o app faz login anônimo e chama esta função com código + PIN
@@ -277,6 +324,8 @@ revoke all on function public.cancelar_convite(text) from public, anon;
 grant execute on function public.vincular_parceiro(text, text) to authenticated;
 grant execute on function public.tornar_gestor(text) to authenticated;
 grant execute on function public.criar_convite(text), public.equipe(), public.remover_gestor(uuid), public.cancelar_convite(text) to authenticated;
+revoke all on function public.estoque_disponivel() from public, anon;
+grant execute on function public.estoque_disponivel() to authenticated;
 grant execute on function public.meu_perfil() to authenticated;
 
 -- ---------- Row Level Security ----------
@@ -288,6 +337,7 @@ alter table public.movs enable row level security;
 alter table public.vendas enable row level security;
 alter table public.fechamentos enable row level security;
 alter table public.despesas enable row level security;
+alter table public.pedidos enable row level security;
 alter table public.perfis enable row level security;
 alter table public.tentativas_login enable row level security;
 alter table public.instalacao enable row level security;
@@ -308,6 +358,7 @@ create policy mt_gestor on public.movs        for all to authenticated using (pu
 create policy mt_gestor on public.vendas      for all to authenticated using (public.eh_gestor()) with check (public.eh_gestor());
 create policy mt_gestor on public.fechamentos for all to authenticated using (public.eh_gestor()) with check (public.eh_gestor());
 create policy mt_gestor on public.despesas    for all to authenticated using (public.eh_gestor()) with check (public.eh_gestor());
+create policy mt_gestor on public.pedidos     for all to authenticated using (public.eh_gestor()) with check (public.eh_gestor());
 create policy mt_gestor_le_perfis on public.perfis for select to authenticated using (public.eh_gestor());
 create policy mt_dono_perfis on public.perfis for all to authenticated using (public.eh_dono() and papel <> 'dono') with check (public.eh_dono() and papel <> 'dono');
 
@@ -320,15 +371,18 @@ create policy mt_parceiro_movs     on public.movs        for select to authentic
 create policy mt_parceiro_vendas   on public.vendas      for all to authenticated using (cliente_id = public.meu_cliente()) with check (cliente_id = public.meu_cliente());
 create policy mt_parceiro_fech_sel on public.fechamentos for select to authenticated using (cliente_id = public.meu_cliente());
 create policy mt_parceiro_fech_ins on public.fechamentos for insert to authenticated with check (cliente_id = public.meu_cliente() and status = 'enviado');
+create policy mt_parceiro_ped_sel  on public.pedidos     for select to authenticated using (cliente_id = public.meu_cliente());
+create policy mt_parceiro_ped_ins  on public.pedidos     for insert to authenticated with check (cliente_id = public.meu_cliente() and status = 'solicitado');
+create policy mt_parceiro_ped_del  on public.pedidos     for delete to authenticated using (cliente_id = public.meu_cliente() and status = 'solicitado');
 create policy mt_proprio_perfil    on public.perfis      for select to authenticated using (user_id = auth.uid());
 
-grant select, insert, update, delete on public.config, public.produtos, public.custos, public.clientes, public.movs, public.vendas, public.fechamentos, public.despesas, public.perfis to authenticated;
+grant select, insert, update, delete on public.config, public.produtos, public.custos, public.clientes, public.movs, public.vendas, public.fechamentos, public.pedidos, public.despesas, public.perfis to authenticated;
 revoke all on public.instalacao, public.tentativas_login, public.convites from anon, authenticated;
 
 -- ---------- Tempo real ----------
 do $$ declare t text; begin
   if exists (select 1 from pg_publication where pubname = 'supabase_realtime') then
-    foreach t in array array['config','produtos','clientes','movs','vendas','fechamentos','despesas'] loop
+    foreach t in array array['config','produtos','clientes','movs','vendas','fechamentos','pedidos','despesas'] loop
       if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = t) then
         execute format('alter publication supabase_realtime add table public.%I', t);
       end if;

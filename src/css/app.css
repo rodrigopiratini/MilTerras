@@ -303,3 +303,7 @@ a.li, .li.click { color: inherit; cursor: pointer; }
 .khead { display: flex; justify-content: space-between; align-items: center; padding: 2px 4px; }
 .kcard { padding: 12px; }
 @media (max-width: 900px) { .kanban { grid-template-columns: repeat(4, 82vw); } }
+
+.li.off { opacity: .55; }
+.kanban.k5 { grid-template-columns: repeat(5, minmax(230px, 1fr)); }
+@media (max-width: 900px) { .kanban.k5 { grid-template-columns: repeat(5, 82vw); } }

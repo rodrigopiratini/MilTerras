@@ -45,7 +45,7 @@ export function seed({ vazio = false } = {}) {
   const s = {
     meta: { versao: 1, criadoEm: new Date().toISOString(), demo: !vazio, empresa: 'Mil Terras', whatsapp: '5554991165105', instagram: '@milterrasvinhos', pinGestor: '0000' },
     produtos: PRODUTOS.map((p) => ({ ...p })),
-    clientes: [], movs: [], vendas: [], fechamentos: [], despesas: [],
+    clientes: [], movs: [], vendas: [], fechamentos: [], despesas: [], pedidos: [],
   };
   if (vazio) return s;
 
@@ -169,6 +169,8 @@ export function seed({ vazio = false } = {}) {
     dp.valor = Math.round(rec * 0.08); delete dp._calc;
   }
   s.despesas.push({ id: uid('dp'), data: addDays(T, -20), categoria: 'Marketing', descricao: 'Degustação com sommelier — Gramado', valor: 1800, pago: true });
+  // um pedido de reposição aguardando aprovação (demonstração)
+  D.criarPedido(s, { clienteId: 'cl2', itens: [{ produtoId: 'rufia', qtd: 4 }, { produtoId: 'barolo', qtd: 2 }], obs: 'Evento de vinhos na sexta' }).data = addDays(T, -1);
   for (const c of s.clientes) delete c._porte;
   return s;
 }

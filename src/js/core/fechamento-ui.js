@@ -55,15 +55,16 @@ export function renderWizard(s, w, { modo = 'cliente' } = {}) {
     }).join('')}</div></div>`;
   }
   if (w.step === 2) {
+    const disp = modo === 'gestor' ? D.estoqueCentral(s) : D.estoqueDisponivel(s);
     if (!w.repo) {
       const sug = D.sugestaoReposicao(s, w.cid, w.contagem);
-      w.repo = Object.fromEntries(Object.entries(sug).map(([pid, x]) => [pid, x.qtd]));
+      w.repo = Object.fromEntries(Object.entries(sug).map(([pid, x]) => [pid, Math.min(x.qtd, Math.max(0, disp[pid] || 0))]));
       w.sug = sug;
       w.recs = D.recomendacoes(s, w.cid, 3).map((r) => r.produtoId);
     }
     const atuais = Object.keys(w.sug);
     const novos = s.produtos.filter((p) => p.ativo && !atuais.includes(p.id)).sort((a, b) => (w.recs.includes(b.id) ? 1 : 0) - (w.recs.includes(a.id) ? 1 : 0));
-    const line = (p, sub) => `<div class="li">${thumb(p, 'sm')}<div class="grow"><div class="t">${esc(p.nome)}</div><div class="s">${sub}</div></div>${stepper('repo:' + p.id, w.repo[p.id] || 0, { max: 60 })}</div>`;
+    const line = (p, sub) => { const d = Math.max(0, disp[p.id] || 0); return `<div class="li ${d ? '' : 'off'}">${thumb(p, 'sm')}<div class="grow"><div class="t">${esc(p.nome)}</div><div class="s">${sub}</div><div class="s" style="color:${d ? 'var(--ok)' : 'var(--crit)'}">${d ? `${d} disponíveis na Mil Terras` : 'Sem estoque disponível no momento'}</div></div>${stepper('repo:' + p.id, Math.min(w.repo[p.id] || 0, d), { max: d })}</div>`; };
     body = `<p class="small ink2" style="margin-top:0">${icon('spark', '')} Sugerimos quantidades pelo ritmo de vendas de cada rótulo na sua casa (garrafas para os próximos ${c.cicloDias} dias, com margem de segurança). Ajuste à vontade, ou deixe em zero para não repor.</p>
     <div class="card pad-0"><div class="list" style="padding:0 14px">${atuais.map((pid) => {
       const p = D.produto(s, pid); const x = w.sug[pid];
@@ -119,7 +120,7 @@ export function wizardHandlers(w, rerender, commit, onDone, modo = 'cliente', to
     const [k, pid] = inp.name.split(':');
     const v = Math.max(0, Math.min(inp.max === '' ? 999 : +inp.max, +inp.value || 0));
     if (k === 'cont') { w.contagem[pid] = v; w.repo = null; } else w.repo[pid] = v;
-    rerender();
+    setTimeout(rerender); // fora do evento de blur/change
   }
   function finish(aprovar) {
     let f;

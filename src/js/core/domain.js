@@ -74,7 +74,7 @@ export function remessas(s) {
     const r = (g[m.remessaId] ||= { id: m.remessaId, clienteId: m.clienteId, data: m.data, status: m.entrega || 'entregue', itens: [], ref: m.ref, obs: m.obs, hist: m.entregaHist || [], entregueEm: m.entregueEm, recebidoPor: m.recebidoPor });
     r.itens.push({ produtoId: m.produtoId, qtd: m.qtd, movId: m.id });
   }
-  return Object.values(g).map((r) => ({ ...r, garrafas: sum(r.itens, (i) => i.qtd) })).sort((a, b) => (a.data + a.id < b.data + b.id ? 1 : -1));
+  return Object.values(g).map((r) => ({ ...r, garrafas: sum(r.itens, (i) => i.qtd), valor: valorItens(s, r.itens) })).sort((a, b) => (a.data + a.id < b.data + b.id ? 1 : -1));
 }
 
 export function criarRemessa(s, { clienteId, itens, status = 'a_separar', data = today(), ref, obs }) {
@@ -97,6 +97,42 @@ export function emTransito(s) {
   const m = {};
   for (const mv of s.movs) if (!entregue(mv)) m[mv.produtoId] = (m[mv.produtoId] || 0) + mv.qtd;
   return m;
+}
+
+// ---------- Pedidos de reposição (parceiro, entre fechamentos) ----------
+export const STATUS_PEDIDO = { solicitado: { label: 'Solicitado', tone: 'warn' }, aprovado: { label: 'Aprovado', tone: 'ok' }, recusado: { label: 'Recusado', tone: 'crit' } };
+export const pedidos = (s) => s.pedidos || [];
+export const valorItens = (s, itens) => sum(itens, (i) => i.qtd * (produto(s, i.produtoId)?.preco || 0));
+
+// Disponível para pedir = estoque central − pedidos e reposições aguardando aprovação.
+// No app do parceiro (nuvem) o número vem pronto do servidor (s.disponivelRemoto).
+export function estoqueDisponivel(s, { ignorarFechamento } = {}) {
+  if (s.disponivelRemoto) return { ...s.disponivelRemoto };
+  const d = estoqueCentral(s);
+  for (const p of pedidos(s)) if (p.status === 'solicitado') for (const i of p.itens) d[i.produtoId] = (d[i.produtoId] || 0) - i.qtd;
+  for (const f of s.fechamentos) if (f.status === 'enviado' && f.id !== ignorarFechamento) for (const i of f.reposicao || []) d[i.produtoId] = (d[i.produtoId] || 0) - i.qtd;
+  for (const k of Object.keys(d)) d[k] = Math.max(0, d[k]);
+  return d;
+}
+
+export function criarPedido(s, { clienteId, itens, obs = '' }) {
+  const p = { id: uid('pd'), clienteId, data: today(), ts: Date.now(), status: 'solicitado', itens: itens.filter((i) => i.qtd > 0), obs };
+  (s.pedidos ||= []).push(p);
+  return p;
+}
+
+export function aprovarPedido(s, id, { itens, status = 'a_separar', data = today() } = {}) {
+  const p = pedidos(s).find((x) => x.id === id);
+  const central = estoqueCentral(s);
+  const enviar = (itens || p.itens).map((i) => ({ produtoId: i.produtoId, qtd: Math.min(i.qtd, Math.max(0, central[i.produtoId] || 0)) })).filter((i) => i.qtd > 0);
+  p.status = 'aprovado'; p.aprovadoEm = data; p.itensAprovados = enviar;
+  if (enviar.length) p.remessaId = criarRemessa(s, { clienteId: p.clienteId, itens: enviar, status, data, ref: p.id, obs: 'Pedido de reposição' });
+  return p;
+}
+
+export function recusarPedido(s, id, motivo = '') {
+  const p = pedidos(s).find((x) => x.id === id);
+  p.status = 'recusado'; p.motivo = motivo; p.recusadoEm = today();
 }
 
 // ---------- Período / fechamentos ----------
@@ -311,6 +347,28 @@ export function serieMensal(s, meses = 6) {
   return keys.map((k) => ({ ...base[k], lucro: base[k].receita - base[k].cmv - base[k].despesas }));
 }
 
+// Balanço de um mês (competência e caixa) com os lançamentos que o compõem
+export function balancoMes(s, mes) {
+  const vendas = vendasRealizadas(s).filter((v) => v.data.startsWith(mes));
+  const despesas = s.despesas.filter((d) => d.data.startsWith(mes));
+  const recebimentos = [
+    ...s.fechamentos.filter((f) => f.status === 'pago' && (f.pagoEm || '').startsWith(mes)).map((f) => ({ data: f.pagoEm, descricao: `Fechamento ${cliente(s, f.clienteId)?.nome || ''}`, forma: f.formaPagamento, valor: f.total, link: `#/fechamento/${f.id}` })),
+    ...s.movs.filter((m) => m.tipo === 'venda_direta' && m.data.startsWith(mes)).map((m) => ({ data: m.data, descricao: `Venda direta · ${m.qtd}× ${produto(s, m.produtoId)?.nome}`, forma: '', valor: m.qtd * (m.precoUnit || 0) })),
+  ].sort((a, b) => (a.data < b.data ? -1 : 1));
+  const receita = sum(vendas, (v) => v.receita), cmv = sum(vendas, (v) => v.cmv);
+  const compras = sum(despesas.filter((d) => d.categoria === 'Compra de mercadoria'), (d) => d.valor);
+  const operacionais = sum(despesas.filter((d) => d.categoria !== 'Compra de mercadoria'), (d) => d.valor);
+  const recebido = sum(recebimentos, (r) => r.valor);
+  const porParceiro = {};
+  for (const v of vendas) { const k = v.clienteId ? cliente(s, v.clienteId)?.nome : 'Vendas diretas'; porParceiro[k] = (porParceiro[k] || 0) + v.receita; }
+  const porCategoria = {};
+  for (const d of despesas) porCategoria[d.categoria] = (porCategoria[d.categoria] || 0) + d.valor;
+  return { mes, receita, cmv, lucroBruto: receita - cmv, operacionais, compras, resultado: receita - cmv - operacionais,
+    recebido, pago: compras + operacionais, saldoCaixa: recebido - compras - operacionais, garrafas: sum(vendas, (v) => v.qtd),
+    despesas: [...despesas].sort((a, b) => (a.data < b.data ? -1 : 1)), recebimentos, porParceiro, porCategoria,
+    aReceber: sum(contasReceber(s).filter((f) => (f.vencimento || '').startsWith(mes)), (f) => f.total) };
+}
+
 // Consumo diário total de cada rótulo (todos os parceiros + vendas diretas) nos últimos N dias
 export function giroDiario(s, janela = 60) {
   const desde = addDays(today(), -janela);
@@ -379,6 +437,9 @@ export function insights(s) {
   for (const f of s.fechamentos.filter((x) => x.status === 'enviado')) {
     const c = cliente(s, f.clienteId);
     out.push({ nivel: 'acao', icone: 'inbox', titulo: `${c.nome} enviou o fechamento`, texto: `${f.garrafas} garrafas vendidas${f.ajustes ? ` · ${f.ajustes} ajuste(s) de contagem justificado(s)` : ''} · aguardando sua conferência`, link: `#/fechamento/${f.id}` });
+  }
+  for (const p of pedidos(s).filter((x) => x.status === 'solicitado')) {
+    out.push({ nivel: 'acao', icone: 'truck', titulo: `${cliente(s, p.clienteId)?.nome} pediu reposição`, texto: `${sum(p.itens, (i) => i.qtd)} garrafas · ${p.itens.map((i) => produto(s, i.produtoId)?.nome).join(', ')}`, link: '#/remessas', valor: valorItens(s, p.itens) });
   }
   for (const r of contasReceber(s).filter((x) => x.atraso > 0)) {
     const c = cliente(s, r.clienteId);

@@ -14,7 +14,7 @@ const cid = () => (store.modo === 'local' ? localStorage.getItem(SESSION) : stor
 const C = () => D.cliente(S(), cid());
 
 const NAV = [['#/inicio', 'home', 'Início'], ['#/relatorios', 'chart', 'Relatórios'], ['#/vender', 'plus', 'Vender'], ['#/fechamento', 'receipt', 'Fechamento'], ['#/mais', 'menu', 'Mais']];
-const SIDE = [['#/inicio', 'home', 'Início'], ['#/vender', 'plus', 'Registrar venda'], ['#/estoque', 'box', 'Meu estoque'], ['#/relatorios', 'chart', 'Relatórios'], ['#/fechamento', 'receipt', 'Fechamento'], ['#/carta', 'wine', 'Carta e harmonização'], ['#/ajustes', 'gear', 'Equipe e preços']];
+const SIDE = [['#/inicio', 'home', 'Início'], ['#/vender', 'plus', 'Registrar venda'], ['#/estoque', 'box', 'Meu estoque'], ['#/relatorios', 'chart', 'Relatórios'], ['#/fechamento', 'receipt', 'Fechamento'], ['#/pedido', 'truck', 'Pedir reposição'], ['#/carta', 'wine', 'Carta e harmonização'], ['#/ajustes', 'gear', 'Equipe e preços']];
 
 let current = {};
 let handlers = {};
@@ -34,7 +34,7 @@ function shell(title, content, { back } = {}) {
     <div>
       <header class="topbar">${back ? `<button data-act="back" aria-label="Voltar">${icon('arrowL')}</button>` : `<img src="${asset('assets/logo/simbolo_negativo.png')}" alt="">`}<div class="t ellipsis">${title}</div><a style="color:#fff" target="_blank" rel="noopener" href="${waLink(S().meta.whatsapp, `Olá, Mil Terras! Aqui é do ${c.nome}.`)}" aria-label="Falar com a Mil Terras">${icon('whatsapp')}</a></header>
       <main class="main">${content}</main></div>
-    <nav class="tabbar">${NAV.map(([h, ic, n]) => h === '#/vender' ? `<a href="${h}" class="fab"><span class="ic">${icon('plus')}</span></a>` : `<a href="${h}" class="${on(h) || (h === '#/mais' && ['#/carta', '#/ajustes', '#/estoque'].some(on)) ? 'on' : ''}">${icon(ic)}<span>${n}</span>${b(h)}</a>`).join('')}</nav>
+    <nav class="tabbar">${NAV.map(([h, ic, n]) => h === '#/vender' ? `<a href="${h}" class="fab"><span class="ic">${icon('plus')}</span></a>` : `<a href="${h}" class="${on(h) || (h === '#/mais' && ['#/carta', '#/ajustes', '#/estoque', '#/pedido'].some(on)) ? 'on' : ''}">${icon(ic)}<span>${n}</span>${b(h)}</a>`).join('')}</nav>
   </div>`;
 }
 const pageHead = (t, sub = '', actions = '') => `<div class="pagehead"><div><h1>${t}</h1>${sub ? `<div class="sub">${sub}</div>` : ''}</div><div class="row wrap">${actions}</div></div>`;
@@ -66,13 +66,14 @@ function vInicio() {
     </div>
     ${transito.map((r) => `<div class="ins info mt"><span class="ic">${icon('truck')}</span><span class="grow"><div class="t">Reposição ${{ a_separar: 'em preparação', separado: 'separada, sai em breve', em_rota: 'a caminho' }[r.status]}</div><div class="s">${r.itens.map((i) => `${i.qtd}× ${esc(D.produto(s, i.produtoId).nome)}`).join(', ')}</div></span>${badge(D.STATUS_ENTREGA[r.status].label, D.STATUS_ENTREGA[r.status].tone)}</div>`).join('')}
     ${acabando.length ? `<div class="ins atencao mt"><span class="ic">${icon('alert')}</span><span class="grow"><div class="t">${plural(acabando.length, 'rótulo acabando', 'rótulos acabando')}</div><div class="s">${acabando.map(([pid, q]) => `${esc(D.produto(s, pid).nome)} (${q})`).join(', ')}</div></span>
-      <a class="btn sm gold" target="_blank" rel="noopener" href="${waLink(s.meta.whatsapp, `Olá, Mil Terras! Aqui é do ${c.nome}. Precisamos de reposição antecipada de: ${acabando.map(([pid]) => D.produto(s, pid).nome).join(', ')}.`)}">Pedir</a></div>` : ''}
+      <a class="btn sm gold" href="#/pedido?p=${acabando.map(([pid]) => pid).join(',')}">Pedir</a></div>` : ''}
     <div class="grid g2 mt">
       <div class="card"><div class="head"><h2>Mais vendidos no período</h2><a class="small" href="#/relatorios">ver relatórios</a></div>
         ${rv.porProduto.length ? hbars(rv.porProduto.slice(0, 5).map((x) => ({ label: D.produto(s, x.produtoId).nome, value: x.qtd, sub: money(x.receita) + ' na carta' })), (v) => int(v) + ' gf') : empty('Nenhuma venda registrada ainda neste período.<br><a href="#/vender">Registrar a primeira</a>')}</div>
       <div class="col">
         ${topG ? `<div class="card row">${'<div class="avatar" style="background:var(--dourado);color:#fff">' + icon('star') + '</div>'}<div class="grow"><div class="label">Destaque da equipe</div><div style="font-weight:600;font-size:16px">${esc(D.garcom(c, topG.garcomId)?.nome || '—')}</div><div class="small muted">${plural(topG.qtd, 'garrafa')} · ${money0(topG.receita)} no período</div></div></div>` : ''}
         ${ultimo ? `<a class="card row" href="#/fechamento/${ultimo.id}" style="color:inherit"><div class="avatar">${icon('receipt')}</div><div class="grow"><div class="label">Último fechamento</div><div style="font-weight:600">${money(ultimo.total)}</div><div class="small muted">${date(ultimo.inicio)} – ${date(ultimo.fim)}</div></div>${statusBadge(ultimo)}</a>` : ''}
+        <a class="card row" href="#/pedido" style="color:inherit"><div class="avatar">${icon('truck')}</div><div class="grow"><div style="font-weight:600">Pedir reposição</div><div class="small muted">Veja o que a Mil Terras tem disponível e peça sem esperar o fechamento</div></div>${icon('arrowR')}</a>
         <a class="card row" href="#/carta" style="color:inherit"><div class="avatar">${icon('wine')}</div><div class="grow"><div style="font-weight:600">Qual vinho para este prato?</div><div class="small muted">Assistente de harmonização para a equipe</div></div>${icon('arrowR')}</a>
       </div>
     </div>`);
@@ -233,7 +234,7 @@ function vCarta({ query }) {
 function vMais() {
   const c = C();
   return shell('Mais', `<div class="card pad-0"><div class="list" style="padding:0 16px">
-    ${[['#/estoque', 'box', 'Meu estoque'], ['#/carta', 'wine', 'Carta e harmonização'], ['#/ajustes', 'gear', 'Equipe e preços da carta']].map(([h, ic, n]) => `<a class="li" href="${h}"><span class="avatar">${icon(ic)}</span><div class="grow t">${n}</div>${icon('arrowR')}</a>`).join('')}
+    ${[['#/pedido', 'truck', 'Pedir reposição'], ['#/estoque', 'box', 'Meu estoque'], ['#/carta', 'wine', 'Carta e harmonização'], ['#/ajustes', 'gear', 'Equipe e preços da carta']].map(([h, ic, n]) => `<a class="li" href="${h}"><span class="avatar">${icon(ic)}</span><div class="grow t">${n}</div>${icon('arrowR')}</a>`).join('')}
     <a class="li" target="_blank" rel="noopener" href="${waLink(S().meta.whatsapp, `Olá, Mil Terras! Aqui é do ${c.nome}.`)}"><span class="avatar">${icon('whatsapp')}</span><div class="grow t">Falar com a Mil Terras</div></a>
     <a class="li" href="#" data-act="install"><span class="avatar">${icon('download')}</span><div class="grow t">Instalar na tela inicial</div></a>
     <a class="li" href="#" data-act="logout"><span class="avatar">${icon('logout')}</span><div class="grow t">Sair</div></a></div></div>`);
@@ -272,7 +273,33 @@ function vLogin() {
 }
 
 // ---------- Render ----------
-const ROUTES = [['/inicio', vInicio], ['/vender', vVender], ['/estoque', vEstoque], ['/relatorios', vRelatorios], ['/fechamento', vFechamentos], ['/fechamento/novo', vNovoFechamento], ['/fechamento/:id', vFechamento], ['/carta', vCarta], ['/mais', vMais], ['/ajustes', vAjustes]];
+// ---------- Pedido de reposição (entre fechamentos) ----------
+let rascunho = {};
+function vPedido({ query }) {
+  const s = S(), c = C();
+  const disp = D.estoqueDisponivel(s);
+  const est = D.saldoEstimado(s, c.id);
+  if (query.p && !Object.keys(rascunho).length) for (const pid of query.p.split(',')) rascunho[pid] = Math.min(Math.max(1, (c.par?.[pid] || 2) - (est[pid] || 0)), disp[pid] || 0);
+  const recs = D.recomendacoes(s, c.id, 3).map((r) => r.produtoId);
+  const lista = sortBy(s.produtos.filter((p) => p.ativo), (p) => ((est[p.id] || 0) > 0 || c.par?.[p.id] ? 0 : recs.includes(p.id) ? 1 : 2));
+  const itens = Object.entries(rascunho).filter(([, q]) => q > 0).map(([produtoId, qtd]) => ({ produtoId, qtd }));
+  const meus = sortBy(D.pedidos(s).filter((p) => p.clienteId === c.id), (p) => p.ts || 0, true).slice(0, 10);
+  const pendFech = D.periodoAtual(s, c.id).pendente;
+  return shell('Pedir reposição', `
+    ${pageHead('Pedir reposição', 'Escolha os vinhos e as quantidades. Você só consegue pedir o que a Mil Terras tem disponível agora.')}
+    ${pendFech ? `<div class="ajuste-box mb">Seu fechamento já está em conferência e inclui um pedido de reposição. Use esta tela só para itens extras.</div>` : ''}
+    <div class="card pad-0"><div class="list" style="padding:0 14px">${lista.map((p) => { const d = Math.max(0, disp[p.id] || 0); return `<div class="li ${d ? '' : 'off'}">${thumb(p, 'sm')}<div class="grow"><div class="t">${esc(p.nome)} ${recs.includes(p.id) && !(est[p.id] > 0) ? badge('Sugestão', 'opp') : ''}</div>
+      <div class="s">Na casa: ${est[p.id] || 0} · ${money(p.preco)}</div><div class="s" style="color:${d ? 'var(--ok)' : 'var(--crit)'}">${d ? `${d} disponíveis` : 'Sem estoque disponível'}</div></div>${stepper('ped:' + p.id, Math.min(rascunho[p.id] || 0, d), { max: d })}</div>`; }).join('')}</div></div>
+    <label class="field mt"><span>Observação</span><input class="input" id="pedObs" maxlength="200" placeholder="Ex.: entregar até sexta"></label>
+    <div class="row between wz-foot"><div><div class="label">Total do pedido</div><b>${plural(sum(itens, (i) => i.qtd), 'garrafa')} · ${money(D.valorItens(s, itens))}</b></div>
+      <button class="btn ok" data-act="enviarPedido" ${itens.length ? '' : 'disabled'}>${icon('check')} Enviar pedido</button></div>
+    ${meus.length ? `<h2 class="mt">Meus pedidos</h2><div class="card pad-0 mt-s"><div class="list" style="padding:0 16px">${meus.map((p) => { const r = p.remessaId && D.remessas(s).find((x) => x.id === p.remessaId); return `<div class="li"><div class="grow"><div class="t">${date(p.data)} · ${plural(sum(p.itens, (i) => i.qtd), 'garrafa')} · ${money(D.valorItens(s, p.itens))}</div>
+      <div class="s">${p.itens.map((i) => `${i.qtd}× ${esc(D.produto(s, i.produtoId)?.nome)}`).join(', ')}</div>${p.motivo ? `<div class="s" style="color:var(--crit)">${esc(p.motivo)}</div>` : ''}</div>
+      ${r ? badge(D.STATUS_ENTREGA[r.status].label, D.STATUS_ENTREGA[r.status].tone) : badge(D.STATUS_PEDIDO[p.status].label, D.STATUS_PEDIDO[p.status].tone)}
+      ${p.status === 'solicitado' ? `<button class="iconbtn" data-act="cancelarPedido" data-id="${p.id}" aria-label="Cancelar">${icon('trash')}</button>` : ''}</div>`; }).join('')}</div></div>` : ''}`, { back: true });
+}
+
+const ROUTES = [['/inicio', vInicio], ['/pedido', vPedido], ['/vender', vVender], ['/estoque', vEstoque], ['/relatorios', vRelatorios], ['/fechamento', vFechamentos], ['/fechamento/novo', vNovoFechamento], ['/fechamento/:id', vFechamento], ['/carta', vCarta], ['/mais', vMais], ['/ajustes', vAjustes]];
 
 function render(view, params, pattern) {
   current = { view, params, pattern };
@@ -281,6 +308,7 @@ function render(view, params, pattern) {
   const ok = S() && cid() && C()?.ativo;
   app.innerHTML = ok ? view(params) : vLogin();
   mountCharts(app);
+  if (ok && (pattern === '/pedido' || pattern === '/fechamento/novo')) store.atualizarDisponivel();
 }
 function rerender() { const y = scrollY; render(current.view, current.params, current.pattern); scrollTo(0, y); }
 const go = router(ROUTES, render);
@@ -316,15 +344,33 @@ const common = {
   rmG: (el) => confirmar('Remover este garçom? As vendas antigas continuam nos relatórios.', { ok: 'Remover' }).then((y) => y && store.commit((st) => { D.garcom(D.cliente(st, cid()), el.dataset.id).ativo = false; })),
   precos: (f) => { const fd = new FormData(f); store.commit((st) => { const c = D.cliente(st, cid()); for (const [k, v] of fd) { const n = parseMoney(v); if (n > 0) c.precosCarta[k] = n; } }); toast('Preços atualizados'); },
   pix: () => { const s = S(); const code = `PIX Mil Terras · WhatsApp ${s.meta.whatsapp}`; navigator.clipboard?.writeText(code); toast('Chave PIX copiada (configure a chave real em produção)'); },
-  qty: () => {},
+  qty: (el) => {
+    if (!el.name?.startsWith('ped:')) return;
+    const max = el.max === '' ? 999 : +el.max;
+    rascunho[el.name.slice(4)] = Math.max(0, Math.min(max, +el.value || 0));
+    setTimeout(rerender); // fora do evento de blur/change
+  },
+  enviarPedido: () => {
+    const s = S(), c = C();
+    const disp = D.estoqueDisponivel(s);
+    const itens = Object.entries(rascunho).filter(([, q]) => q > 0).map(([produtoId, qtd]) => ({ produtoId, qtd }));
+    const acima = itens.find((i) => i.qtd > (disp[i.produtoId] || 0));
+    if (acima) return toast(`${D.produto(s, acima.produtoId).nome}: só ${disp[acima.produtoId] || 0} disponíveis`);
+    const obs = document.getElementById('pedObs')?.value || '';
+    store.commit((st) => D.criarPedido(st, { clienteId: c.id, itens, obs }), 'pedido');
+    rascunho = {};
+    toast('Pedido enviado para a Mil Terras');
+    if (location.hash.includes('?')) location.hash = '#/pedido'; else rerender();
+  },
+  cancelarPedido: (el) => confirmar('Cancelar este pedido?', { ok: 'Cancelar pedido' }).then((y) => y && store.commit((st) => { st.pedidos = st.pedidos.filter((p) => p.id !== el.dataset.id); })),
 };
 
 delegate(app, new Proxy({}, { get: (_, k) => handlers[k] || common[k] }));
 store.subscribe((s, msg, externo) => {
-  if (!S()) return;
+  if (!S() || !current.view) return; // ainda carregando
   if (document.querySelector('.overlay') && externo) return;
   if (externo && msg === 'aprovado') toast('A Mil Terras aprovou seu fechamento — reposição a caminho!');
-  if (current.pattern === '/fechamento/novo' && msg !== 'fechamento') return; // não interromper a contagem
+  if (current.pattern === '/fechamento/novo' && msg !== 'fechamento' && msg !== 'disponivel') return; // não interromper a contagem
   rerender();
 });
 store.onErro((m) => toast('Não foi possível salvar: ' + m));

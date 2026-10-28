@@ -48,7 +48,7 @@ export async function init(app) {
 
 export function get() {
   if (modo === 'nuvem') return nuvem?.state;
-  if (!state) { state = load(); if (!state) { state = seed(); persist(); } }
+  if (!state) { state = load(); if (!state) { state = seed(); persist(); } state.pedidos ||= []; }
   return state;
 }
 
@@ -82,6 +82,7 @@ export const sair = () => nuvem?.sair();
 export const sessaoAtiva = async () => !!(await nuvem?.sb.auth.getSession())?.data?.session;
 export const recarregar = () => nuvem?.recarregar();
 export const rpc = (fn, args) => nuvem.rpc(fn, args);
+export const atualizarDisponivel = () => nuvem?.atualizarDisponivel();
 export const ehGestor = () => ['dono', 'gestor'].includes(nuvem?.perfil?.papel);
 export const ehDono = () => nuvem?.perfil?.papel === 'dono';
 

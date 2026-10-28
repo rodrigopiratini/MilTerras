@@ -4,7 +4,7 @@
 
 import { CONFIG } from '../config.js';
 
-const TABELAS = ['produtos', 'clientes', 'movs', 'vendas', 'fechamentos', 'despesas'];
+const TABELAS = ['produtos', 'clientes', 'movs', 'vendas', 'fechamentos', 'pedidos', 'despesas'];
 const PAGINA = 1000;
 
 export function criarNuvem(app, hooks) {
@@ -47,6 +47,7 @@ export function criarNuvem(app, hooks) {
     state = { meta: { ...(cfg.find((r) => r.id === 'geral')?.data || {}), demo: false } };
     TABELAS.forEach((t, i) => { state[t] = docs[i].map((r) => r.data); });
     for (const p of state.produtos) if (gestor) p.custo = custos[p.id] ?? p.custo ?? 0; else delete p.custo;
+    if (!gestor) await atualizarDisponivel(false);
     // documentos pendentes na fila (ainda não enviados) prevalecem sobre o servidor
     for (const op of fila) aplicarLocal(op);
     fotografar();
@@ -166,9 +167,20 @@ export function criarNuvem(app, hooks) {
         let msg = t;
         if (t === 'fechamentos' && doc.status !== antes?.status) msg = doc.status === 'enviado' ? 'fechamento' : doc.status === 'aprovado' || doc.status === 'pago' ? 'aprovado' : t;
         hooks.onChange?.(msg, true);
+        if (t === 'movs' || t === 'pedidos' || t === 'fechamentos') atualizarDisponivel();
       });
     }
     canal.subscribe();
+  }
+
+  // Parceiro: estoque disponível vem pronto do servidor (não enxerga as movimentações do depósito)
+  async function atualizarDisponivel(avisarTela = true) {
+    if (!state || ehGestor()) return;
+    const { data, error } = await sb.rpc('estoque_disponivel');
+    if (error) { console.warn('estoque_disponivel', error.message); return; }
+    const antes = JSON.stringify(state.disponivelRemoto || {});
+    state.disponivelRemoto = data || {};
+    if (avisarTela && antes !== JSON.stringify(state.disponivelRemoto)) hooks.onChange?.('disponivel', true);
   }
 
   async function lerPerfil() {
@@ -239,6 +251,7 @@ export function criarNuvem(app, hooks) {
       await sb.auth.signOut();
       perfil = null; state = null;
     },
+    atualizarDisponivel,
     rpc: async (fn, args) => { const { data, error } = await sb.rpc(fn, args); if (error) throw new Error(error.message); return data; },
     recarregar: async () => { await carregar(); hooks.onChange?.('recarregado', true); },
   };

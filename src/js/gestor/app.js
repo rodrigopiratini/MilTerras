@@ -34,7 +34,7 @@ function shell(title, content, { back } = {}) {
   const pend = s.fechamentos.filter((f) => f.status === 'enviado').length;
   const route = '#' + (location.hash.slice(1).split('?')[0] || '');
   const isOn = (h) => route === h || route.startsWith(h + '/') || (h === '#/parceiros' && route.startsWith('#/parceiro')) || (h === '#/fechamentos' && route.startsWith('#/fechamento'));
-  const remPend = D.remessas(s).filter((r) => r.status !== 'entregue').length;
+  const remPend = D.remessas(s).filter((r) => r.status !== 'entregue').length + D.pedidos(s).filter((p) => p.status === 'solicitado').length;
   const b = (h) => (h === '#/fechamentos' && pend ? `<span class="badge dot">${pend}</span>` : h === '#/remessas' && remPend ? `<span class="badge dot">${remPend}</span>` : '');
   return `<div class="shell">
     <aside class="side">
@@ -330,9 +330,9 @@ function vRemessas({ query }) {
     const dias = diffDays(today(), r.data);
     return `<div class="card kcard">
       <div class="row between"><b class="ellipsis">${esc(c?.nome || '—')}</b>${r.status !== 'entregue' && dias >= 2 ? badge(`${dias}d`, 'warn') : ''}</div>
-      <div class="tiny muted">${date(r.data)} · ${r.ref ? 'reposição de fechamento' : esc(r.obs || 'remessa manual')}</div>
+      <div class="tiny muted">${date(r.data)} · ${r.ref?.startsWith('pd') ? 'pedido do parceiro' : r.ref ? 'reposição de fechamento' : esc(r.obs || 'remessa manual')}</div>
       <div class="small mt-s">${r.itens.map((i) => `${i.qtd}× ${esc(D.produto(s, i.produtoId).nome)}`).join('<br>')}</div>
-      <div class="row between mt-s"><b>${plural(r.garrafas, 'garrafa')}</b>${r.status === 'entregue' ? `<span class="tiny muted">${r.entregueEm ? date(r.entregueEm) : ''}${r.recebidoPor ? ' · ' + esc(r.recebidoPor) : ''}</span>` : ''}</div>
+      <div class="row between mt-s"><b>${plural(r.garrafas, 'garrafa')} · ${money(r.valor)}</b>${r.status === 'entregue' ? `<span class="tiny muted">${r.entregueEm ? date(r.entregueEm) : ''}${r.recebidoPor ? ' · ' + esc(r.recebidoPor) : ''}</span>` : ''}</div>
       <div class="row wrap gap-s mt-s">
         ${st.prox ? `<button class="btn sm" data-act="avancarRem" data-id="${r.id}" data-st="${st.prox}">${st.acao}</button>` : ''}
         <a class="btn ghost sm" href="#/imprimir/romaneio/${r.clienteId}?r=${r.id}" title="Romaneio">${icon('print')}</a>
@@ -340,9 +340,21 @@ function vRemessas({ query }) {
         ${r.status !== 'entregue' && r.status !== 'a_separar' ? `<button class="btn ghost sm" data-act="voltarRem" data-id="${r.id}" data-st="${cols[cols.indexOf(r.status) - 1]}" title="Voltar etapa">${icon('arrowL')}</button>` : ''}
       </div></div>`;
   };
+  const peds = D.pedidos(s).filter((p) => p.status === 'solicitado');
+  const fechs = s.fechamentos.filter((f) => f.status === 'enviado' && (f.reposicao || []).length);
+  const cardSol = (titulo, sub, itens, acoes) => `<div class="card kcard"><b class="ellipsis">${titulo}</b><div class="tiny muted">${sub}</div>
+      <div class="small mt-s">${itens.map((i) => `${i.qtd}× ${esc(D.produto(s, i.produtoId)?.nome)}`).join('<br>')}</div>
+      <div class="mt-s"><b>${plural(sum(itens, (i) => i.qtd), 'garrafa')} · ${money(D.valorItens(s, itens))}</b></div><div class="row wrap gap-s mt-s">${acoes}</div></div>`;
+  const solicitado = [
+    ...peds.map((p) => cardSol(esc(D.cliente(s, p.clienteId)?.nome || '—'), `${date(p.data)} · pedido pelo app${p.obs ? ' · ' + esc(p.obs) : ''}`, p.itens,
+      `<button class="btn sm ok" data-act="aprovarPedido" data-id="${p.id}">Aprovar</button><button class="btn ghost sm" data-act="recusarPedido" data-id="${p.id}">Recusar</button>`)),
+    ...fechs.map((f) => cardSol(esc(D.cliente(s, f.clienteId)?.nome || '—'), `${date(f.fim)} · reposição do fechamento`, f.reposicao,
+      `<a class="btn sm" href="#/fechamento/${f.id}">Conferir fechamento</a>`)),
+  ];
+  const totSol = [...peds.flatMap((p) => p.itens), ...fechs.flatMap((f) => f.reposicao)];
   return shell('Remessas', `
-    ${pageHead('Remessas', 'Separação e entrega das garrafas aos parceiros', `<button class="btn" data-act="remessa">${icon('plus')} Nova remessa</button>`)}
-    <div class="kanban">${cols.map((k) => { const xs = k === 'entregue' ? entregues : todas.filter((r) => r.status === k); return `<div class="kcol"><div class="khead">${badge(D.STATUS_ENTREGA[k].label, D.STATUS_ENTREGA[k].tone)}<span class="small muted">${k === 'entregue' ? 'recentes' : plural(sum(xs, (r) => r.garrafas), 'garrafa')}</span></div>
+    ${pageHead('Remessas', 'Pedidos, separação e entrega das garrafas aos parceiros', `<button class="btn" data-act="remessa">${icon('plus')} Nova remessa</button>`)}
+    <div class="kanban k5"><div class="kcol"><div class="khead">${badge('Solicitado', 'warn')}<span class="small muted">${money0(D.valorItens(s, totSol))}</span></div>${solicitado.join('') || '<div class="empty small">Nenhum pedido</div>'}</div>${cols.map((k) => { const xs = k === 'entregue' ? entregues : todas.filter((r) => r.status === k); return `<div class="kcol"><div class="khead">${badge(D.STATUS_ENTREGA[k].label, D.STATUS_ENTREGA[k].tone)}<span class="small muted">${k === 'entregue' ? 'recentes' : `${plural(sum(xs, (r) => r.garrafas), 'garrafa')} · ${money0(sum(xs, (r) => r.valor))}`}</span></div>
       ${xs.map(card).join('') || '<div class="empty small">Nada aqui</div>'}
       ${k === 'entregue' && todas.filter((r) => r.status === 'entregue').length > entregues.length ? `<button class="btn ghost sm block" data-act="goto" data-h="#/remessas?mais=${entregues.length + 20}">Ver mais</button>` : ''}</div>`; }).join('')}</div>
     <div class="tiny muted mt">O estoque central baixa quando a remessa é criada. As garrafas só entram no saldo do parceiro (e na contagem do fechamento) quando a remessa é marcada como <b>Entregue</b>.</div>`);
@@ -424,6 +436,15 @@ function vParceiro({ id, query }) {
     ${body}`, { back: true });
 }
 
+// Código de acesso aleatório e único (sem letras/números que confundem: 0/O, 1/I)
+function gerarCodigo() {
+  const A = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const usados = new Set((S()?.clientes || []).map((c) => c.codigo));
+  let cod;
+  do { cod = 'MT' + Array.from({ length: 4 }, () => A[Math.floor(Math.random() * A.length)]).join(''); } while (usados.has(cod));
+  return cod;
+}
+
 function formCliente(c = {}) {
   const novo = !c.id;
   return `<form id="fcli" class="card col" data-onsubmit="salvarCliente" data-id="${c.id || ''}">
@@ -442,7 +463,7 @@ function formCliente(c = {}) {
     <div class="field"><span>Formas de pagamento liberadas</span><div class="chips">${D.FORMAS_PAGAMENTO.map((f) => `<label class="chip"><input type="checkbox" name="forma" value="${f}" ${(c.formasPagamento || ['PIX']).includes(f) ? 'checked' : ''}> ${f}</label>`).join('')}</div></div>
     <div class="grid g2">
       <label class="field"><span>Garçons / equipe (separados por vírgula)</span><input class="input" name="garcons" value="${esc((c.garcons || []).filter((g) => g.ativo).map((g) => g.nome).join(', '))}"></label>
-      <div class="grid g2"><label class="field"><span>Código de acesso</span><input class="input" name="codigo" value="${esc(c.codigo || '')}" style="text-transform:uppercase"></label><label class="field"><span>PIN (4 dígitos)</span><input class="input" name="pin" inputmode="numeric" maxlength="4" value="${esc(c.pin || String(Math.floor(1000 + Math.random() * 9000)))}"></label></div>
+      <div class="grid g2"><label class="field"><span>Código de acesso (automático)</span><div class="row gap-s"><input class="input" name="codigo" value="${esc(c.codigo || gerarCodigo())}" readonly style="font-weight:600;letter-spacing:.06em"><button type="button" class="iconbtn" data-act="novoCodigo" title="Gerar outro código">${icon('refresh')}</button></div></label><label class="field"><span>PIN (4 dígitos)</span><input class="input" name="pin" inputmode="numeric" maxlength="4" value="${esc(c.pin || String(Math.floor(1000 + Math.random() * 9000)))}"></label></div>
     </div>
     <div class="row between wrap">${novo ? '<span></span>' : `<label class="row small"><input type="checkbox" name="ativo" ${c.ativo ? 'checked' : ''}> Parceiro ativo</label>`}<button class="btn">${novo ? 'Cadastrar parceiro' : 'Salvar alterações'}</button></div>
   </form>`;
@@ -514,7 +535,55 @@ function vNovoFechamento({ cid }) {
 let wz = null;
 
 // ---------- Financeiro ----------
+const nomeMes = (k) => { const [y, m] = k.split('-').map(Number); const t = new Date(y, m - 1, 1).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }); return t[0].toUpperCase() + t.slice(1); };
+const mesMais = (k, n) => { const [y, m] = k.split('-').map(Number); const d = new Date(y, m - 1 + n, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; };
+const segFin = (v) => `<div class="seg"><button class="${v === 'mes' ? 'on' : ''}" data-act="goto" data-h="#/financeiro">Balanço do mês</button><button class="${v === 'periodo' ? 'on' : ''}" data-act="goto" data-h="#/financeiro?v=periodo">Comparativo</button></div>`;
+
 function vFinanceiro({ query }) {
+  if (query.v === 'periodo') return vFinanceiroPeriodo({ query });
+  const s = S();
+  const mes = query.mes || today().slice(0, 7);
+  const b = D.balancoMes(s, mes);
+  const linha = (n, v, forte, neg) => `<tr><td style="${forte ? 'font-weight:600' : ''}">${n}</td><td class="r" style="white-space:nowrap;${forte ? 'font-weight:600' : ''}${v < 0 ? ';color:var(--crit)' : ''}">${neg && v ? '− ' : ''}${money(Math.abs(v))}</td></tr>`;
+  return shell('Financeiro', `
+    ${pageHead('Financeiro', 'Balanço mensal de receitas e despesas', `${segFin('mes')}<button class="btn ghost" data-act="csvMes" data-m="${mes}">${icon('download')} CSV do mês</button><button class="btn" data-act="despesa">${icon('plus')} Despesa</button>`)}
+    <div class="row between mb"><button class="btn ghost sm" data-act="goto" data-h="#/financeiro?mes=${mesMais(mes, -1)}">${icon('arrowL')} ${nomeMes(mesMais(mes, -1))}</button>
+      <h2>${nomeMes(mes)}</h2>
+      <button class="btn ghost sm" data-act="goto" data-h="#/financeiro?mes=${mesMais(mes, 1)}" ${mes >= today().slice(0, 7) ? 'disabled' : ''}>${nomeMes(mesMais(mes, 1))} ${icon('arrowR')}</button></div>
+    <div class="grid g4">
+      ${kpi('Receitas', money0(b.receita), `${plural(b.garrafas, 'garrafa vendida', 'garrafas vendidas')}`)}
+      ${kpi('Despesas', money0(b.operacionais + b.compras), `${money0(b.operacionais)} operacionais · ${money0(b.compras)} compras`)}
+      ${kpi('Resultado do mês', `<span class="${b.resultado >= 0 ? 'up' : 'down'}">${money0(b.resultado)}</span>`, `receitas − custo dos vinhos − despesas operacionais`)}
+      ${kpi('Saldo de caixa', `<span class="${b.saldoCaixa >= 0 ? 'up' : 'down'}">${money0(b.saldoCaixa)}</span>`, `${money0(b.recebido)} recebido − ${money0(b.pago)} pago`)}
+    </div>
+    <div class="grid g2 mt">
+      <div class="card pad-0"><div style="padding:16px 16px 0"><h2>Demonstrativo do mês</h2></div><div class="tbl-wrap"><table class="tbl"><tbody>
+        ${linha('Receitas de vendas (fechamentos + vendas diretas)', b.receita, true)}
+        ${linha('(−) Custo dos vinhos vendidos', b.cmv, false, true)}
+        ${linha('= Lucro bruto', b.lucroBruto, true)}
+        ${Object.entries(b.porCategoria).filter(([k]) => k !== 'Compra de mercadoria').sort((a, c) => c[1] - a[1]).map(([k, v]) => linha(`(−) ${esc(k)}`, v, false, true)).join('')}
+        ${linha('= Resultado', b.resultado, true)}
+        <tr><td colspan="2" class="label" style="padding-top:18px">Caixa</td></tr>
+        ${linha('Recebido no mês', b.recebido)}
+        ${linha('(−) Compras de mercadoria', b.compras, false, true)}
+        ${linha('(−) Despesas operacionais pagas', b.operacionais, false, true)}
+        ${linha('= Saldo de caixa', b.saldoCaixa, true)}
+        ${b.aReceber ? linha('A receber com vencimento no mês', b.aReceber) : ''}
+      </tbody></table></div></div>
+      <div class="col">
+        <div class="card"><div class="head"><h2>Receitas por parceiro</h2></div>${Object.keys(b.porParceiro).length ? hbars(Object.entries(b.porParceiro).sort((a, c) => c[1] - a[1]).map(([k, v]) => ({ label: k, value: v })), money0) : empty('Sem receitas neste mês')}</div>
+        <div class="card"><div class="head"><h2>Despesas por categoria</h2></div>${Object.keys(b.porCategoria).length ? hbars(Object.entries(b.porCategoria).sort((a, c) => c[1] - a[1]).map(([k, v]) => ({ label: k, value: v })), money0, { color: 'var(--dourado)' }) : empty('Sem despesas neste mês')}</div>
+      </div>
+    </div>
+    <div class="grid g2 mt">
+      <div class="card pad-0"><div style="padding:16px 16px 0" class="row between"><h2>Recebimentos</h2><b class="small">${money(b.recebido)}</b></div>
+        <div class="list" style="padding:0 16px">${b.recebimentos.map((r) => `<${r.link ? `a href="${r.link}"` : 'div'} class="li"><div class="grow"><div class="t">${esc(r.descricao)}</div><div class="s">${date(r.data)}${r.forma ? ' · ' + esc(r.forma) : ''}</div></div><div class="num up">${money(r.valor)}</div></${r.link ? 'a' : 'div'}>`).join('') || empty('Nenhum recebimento', 'money')}</div></div>
+      <div class="card pad-0"><div style="padding:16px 16px 0" class="row between"><h2>Despesas</h2><b class="small">${money(b.operacionais + b.compras)}</b></div>
+        <div class="list" style="padding:0 16px">${b.despesas.map((d) => `<div class="li"><div class="grow"><div class="t">${esc(d.descricao)}</div><div class="s">${esc(d.categoria)} · ${date(d.data)}</div></div><div class="num down">${money(d.valor)}</div><button class="iconbtn" data-act="delDesp" data-id="${d.id}" aria-label="Excluir">${icon('trash')}</button></div>`).join('') || empty('Nenhuma despesa', 'money')}</div></div>
+    </div>`);
+}
+
+function vFinanceiroPeriodo({ query }) {
   const s = S();
   const meses = +(query.m || 6);
   const serie = D.serieMensal(s, meses);
@@ -523,7 +592,7 @@ function vFinanceiro({ query }) {
   const desp = sortBy(s.despesas, (d) => d.data, true).slice(0, 12);
   const porCat = Object.entries(s.despesas.filter((d) => d.data >= addDays(today(), -30 * meses) && d.categoria !== 'Compra de mercadoria').reduce((m, d) => ((m[d.categoria] = (m[d.categoria] || 0) + d.valor), m), {})).sort((a, b) => b[1] - a[1]);
   return shell('Financeiro', `
-    ${pageHead('Financeiro', 'Resultado, contas a receber e despesas', `<div class="seg">${[3, 6, 12].map((m) => `<button class="${meses === m ? 'on' : ''}" data-act="goto" data-h="#/financeiro?m=${m}">${m} meses</button>`).join('')}</div><button class="btn ghost" data-act="csvFin">${icon('download')} CSV</button><button class="btn" data-act="despesa">${icon('plus')} Despesa</button>`)}
+    ${pageHead('Financeiro', 'Comparativo mensal, contas a receber e despesas', `${segFin('periodo')}<div class="seg">${[3, 6, 12].map((m) => `<button class="${meses === m ? 'on' : ''}" data-act="goto" data-h="#/financeiro?v=periodo&m=${m}">${m} meses</button>`).join('')}</div><button class="btn ghost" data-act="csvFin">${icon('download')} CSV</button><button class="btn" data-act="despesa">${icon('plus')} Despesa</button>`)}
     <div class="grid g4">${kpi('Faturamento', moneyK(tot.receita), `${meses} meses`)}${kpi('Lucro bruto', moneyK(tot.receita - tot.cmv), `margem ${percent(tot.receita ? (tot.receita - tot.cmv) / tot.receita : 0)}`)}${kpi('Despesas operacionais', moneyK(tot.despesas), 'sem compras de mercadoria')}${kpi('Resultado', moneyK(tot.lucro), `margem líquida ${percent(tot.receita ? tot.lucro / tot.receita : 0)}`, tot.lucro >= 0 ? '' : '')}</div>
     <div class="grid g-2-1 mt">
       <div class="card"><div class="head"><h2>Resultado mensal</h2></div>${chart({ type: 'columns', height: 230, data: serie.map((m) => ({ label: monthLabel(m.mes), value: Math.max(0, m.lucro), tip: `<b>${monthLabel(m.mes)}</b><br>Faturamento: ${money0(m.receita)}<br>CMV: ${money0(m.cmv)}<br>Despesas: ${money0(m.despesas)}<br><b>Resultado: ${money0(m.lucro)}</b>` })), fmt: money0, fmtAxis: moneyK })}</div>
@@ -642,7 +711,7 @@ function vConfig() {
     ${pageHead('Configurações')}
     <div class="grid g2">
       <div class="card col"><h2>Acesso dos parceiros</h2><div class="small ink2">Cada parceiro entra no app <b>Mil Terras Parceiro</b> com o código do estabelecimento e um PIN. Envie o link pelo WhatsApp. Trocar o PIN (no cadastro do parceiro) desconecta os aparelhos dele.</div>
-        <div class="list">${s.clientes.filter((c) => c.ativo).map((c) => `<div class="li"><div class="grow"><div class="t">${esc(c.nome)}</div><div class="s">Código <b>${esc(c.codigo)}</b> · PIN <b>${esc(c.pin)}</b></div></div><div class="row gap-s"><a class="btn ghost sm" target="_blank" rel="noopener" href="${waLink(c.telefone, msgAcesso(c, base))}">${icon('whatsapp')} WhatsApp</a>${c.email ? `<a class="btn ghost sm" href="${mailAcesso(c, base)}">E-mail</a>` : ''}</div></div>`).join('') || empty('Nenhum parceiro cadastrado ainda', 'store')}</div>
+        <div class="list">${s.clientes.filter((c) => c.ativo).map((c) => `<div class="li"><div class="grow"><div class="t">${esc(c.nome)}</div><div class="s">Código <b>${esc(c.codigo)}</b> · PIN <b>${esc(c.pin)}</b></div></div><div class="row gap-s"><a class="btn ghost sm" target="_blank" rel="noopener" href="${waLink(c.telefone, msgAcesso(c, base))}">${icon('whatsapp')} WhatsApp</a>${c.email ? `<a class="btn ghost sm" href="${mailAcesso(c, base)}">E-mail</a>` : ''}<button class="btn ghost sm" data-act="copiarAcesso" data-c="${c.id}">Copiar</button></div></div>`).join('') || empty('Nenhum parceiro cadastrado ainda', 'store')}</div>
         <a class="btn ghost" href="${base}" target="_blank" rel="noopener">${icon('link')} Abrir app do parceiro</a></div>
       <div class="col">
         ${nuvem ? `<div class="card col"><h2>Equipe de gestão</h2><div id="equipe" class="small muted">Carregando…</div>
@@ -802,14 +871,14 @@ const common = {
   mov: (el) => modalMov(el.dataset.t),
   remessa: (el) => modalRemessa(el.dataset.c),
   devolucao: (el) => modalRemessa(el.dataset.c, 'devolucao'),
-  editCliente: () => modal({ title: 'Novo parceiro', wide: true, body: formCliente(), handlers: { salvarCliente: (f) => common.salvarCliente(f) } }),
+  editCliente: () => modal({ title: 'Novo parceiro', wide: true, body: formCliente(), handlers: { salvarCliente: (f) => common.salvarCliente(f), novoCodigo: (el) => common.novoCodigo(el) } }),
   salvarCliente: (f) => {
     const fd = new FormData(f);
     const id = f.dataset.id;
     const formas = fd.getAll('forma');
     if (!formas.length) return toast('Libere ao menos uma forma de pagamento');
-    const cod = String(fd.get('codigo') || fd.get('nome')).toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10);
-    if (S().clientes.some((c) => c.id !== id && c.codigo === cod)) return toast(`O código ${cod} já é usado por outro parceiro`);
+    let cod = String(fd.get('codigo') || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10);
+    if (!cod || S().clientes.some((c) => c.id !== id && c.codigo === cod)) cod = gerarCodigo();
     if (!/^\d{4}$/.test(String(fd.get('pin')))) return toast('O PIN precisa ter 4 números');
     let nid = id;
     store.commit((st) => {
@@ -830,8 +899,8 @@ const common = {
         const c = D.cliente(S(), nid);
         const base = new URL('../cliente/' + DEMO_Q, location.href).href;
         modal({ title: 'Parceiro cadastrado', body: `<p class="small">Envie o acesso ao app para <b>${esc(c.nome)}</b>: link, código <b>${esc(c.codigo)}</b> e PIN <b>${esc(c.pin)}</b>, com o passo a passo para instalar no celular.</p>`,
-          foot: `<a class="btn ghost" target="_blank" rel="noopener" href="${waLink(c.telefone, msgAcesso(c, base))}">${icon('whatsapp')} WhatsApp</a>${c.email ? `<a class="btn ghost" href="${mailAcesso(c, base)}">E-mail</a>` : ''}<button class="btn" data-act="primRem">${icon('truck')} Primeira remessa</button>`,
-          handlers: { primRem: () => { closeModal(); modalRemessa(nid); } } });
+          foot: `<a class="btn ghost" target="_blank" rel="noopener" href="${waLink(c.telefone, msgAcesso(c, base))}">${icon('whatsapp')} WhatsApp</a>${c.email ? `<a class="btn ghost" href="${mailAcesso(c, base)}">E-mail</a>` : ''}<button class="btn ghost" data-act="copiarAcesso" data-c="${c.id}">Copiar mensagem</button><button class="btn" data-act="primRem">${icon('truck')} Primeira remessa</button>`,
+          handlers: { primRem: () => { closeModal(); modalRemessa(nid); }, copiarAcesso: common.copiarAcesso } });
       }, 300);
     }
   },
@@ -865,6 +934,15 @@ const common = {
     foot: `<button class="btn ghost" data-act="close">Cancelar</button><button class="btn" data-act="ok">Salvar</button>`,
     handlers: { ok: () => { const fd = Object.fromEntries(new FormData(document.getElementById('fdesp'))); const v = parseMoney(fd.valor); if (!fd.descricao || !v) return toast('Preencha descrição e valor'); store.commit((st) => st.despesas.push({ id: uid('dp'), ...fd, valor: v, pago: true })); closeModal(); toast('Despesa lançada'); } } }),
   delDesp: (el) => confirmar('Excluir esta despesa?', { ok: 'Excluir' }).then((y) => y && store.commit((st) => { st.despesas = st.despesas.filter((d) => d.id !== el.dataset.id); })),
+  csvMes: (el) => {
+    const b = D.balancoMes(S(), el.dataset.m);
+    const f = (v) => v.toFixed(2).replace('.', ',');
+    const rows = [['Tipo', 'Data', 'Descrição', 'Categoria/forma', 'Valor']];
+    for (const r of b.recebimentos) rows.push(['Recebimento', r.data, r.descricao, r.forma, f(r.valor)]);
+    for (const d of b.despesas) rows.push(['Despesa', d.data, d.descricao, d.categoria, f(-d.valor)]);
+    rows.push([], ['Resumo', '', 'Receitas (competência)', '', f(b.receita)], ['Resumo', '', 'Custo dos vinhos vendidos', '', f(-b.cmv)], ['Resumo', '', 'Despesas operacionais', '', f(-b.operacionais)], ['Resumo', '', 'Resultado', '', f(b.resultado)], ['Resumo', '', 'Saldo de caixa', '', f(b.saldoCaixa)]);
+    download(`milterras-balanco-${el.dataset.m}.csv`, toCSV(rows), 'text/csv');
+  },
   csvFin: () => {
     const s = S();
     const rows = [['Data', 'Tipo', 'Parceiro', 'Rótulo', 'Qtd', 'Preço un.', 'Receita', 'CMV']];
@@ -886,6 +964,37 @@ const common = {
   removerGestor: (el) => confirmar(`Remover o acesso de <b>${el.dataset.e}</b> à Gestão?`, { ok: 'Remover' }).then(async (y) => { if (!y) return; try { await store.rpc('remover_gestor', { p_user: el.dataset.u }); toast('Acesso removido'); carregarEquipe(); } catch (e) { toast(e.message); } }),
   cancelarConvite: (el) => store.rpc('cancelar_convite', { p_codigo: el.dataset.c }).then(() => { toast('Convite cancelado'); carregarEquipe(); }).catch((e) => toast(e.message)),
   consigDet: (el) => modalConsig(el.dataset.c),
+  novoCodigo: (el) => {
+    const inp = el.parentElement.querySelector('input');
+    const editando = el.closest('form')?.dataset.id;
+    const trocar = () => { inp.value = gerarCodigo(); toast(`Novo código: ${inp.value}${editando ? ' (salve para valer)' : ''}`); };
+    if (editando) confirmar('Gerar um novo código? Depois de salvar, os aparelhos do parceiro serão desconectados e ele precisará do novo código.', { ok: 'Gerar novo' }).then((y) => y && trocar()); else trocar();
+  },
+  copiarAcesso: (el) => {
+    const c = D.cliente(S(), el.dataset.c);
+    const txt = msgAcesso(c, new URL('../cliente/' + DEMO_Q, location.href).href);
+    (navigator.clipboard?.writeText(txt) || Promise.reject()).then(() => toast('Mensagem copiada — cole no e-mail ou WhatsApp'), () => modal({ title: 'Copie a mensagem', body: `<textarea class="input" style="min-height:220px">${esc(txt)}</textarea>` }));
+  },
+  aprovarPedido: (el) => {
+    const s = S();
+    const p = D.pedidos(s).find((x) => x.id === el.dataset.id);
+    const est = D.estoqueCentral(s);
+    modal({ title: `Aprovar pedido · ${esc(D.cliente(s, p.clienteId)?.nome)}`, body: `<form id="fped" class="col">
+      <div class="card pad-0"><div class="list" style="padding:0 14px">${p.itens.map((i) => { const pr = D.produto(s, i.produtoId); return `<div class="li">${thumb(pr, 'sm')}<div class="grow"><div class="t">${esc(pr.nome)}</div><div class="s">Pedido: ${i.qtd} · central: ${est[i.produtoId]}</div></div>${stepper('q:' + i.produtoId, Math.min(i.qtd, Math.max(0, est[i.produtoId])), { max: Math.max(0, est[i.produtoId]) })}</div>`; }).join('')}</div></div>
+      ${p.obs ? `<div class="small"><b>Observação:</b> ${esc(p.obs)}</div>` : ''}
+      <label class="field"><span>Entrar no kanban como</span><select class="input" name="status">${Object.entries(D.STATUS_ENTREGA).map(([k, v]) => `<option value="${k}">${v.label}</option>`).join('')}</select></label></form>`,
+      foot: '<button class="btn ghost" data-act="close">Cancelar</button><button class="btn ok" data-act="ok">Aprovar e criar remessa</button>',
+      handlers: { step: stepHandler, qty: () => {}, ok: () => {
+        const fd = new FormData(document.getElementById('fped'));
+        const itens = p.itens.map((i) => ({ produtoId: i.produtoId, qtd: +fd.get('q:' + i.produtoId) || 0 }));
+        if (!itens.some((i) => i.qtd > 0)) return toast('Nenhuma quantidade para enviar — use Recusar');
+        store.commit((st) => D.aprovarPedido(st, p.id, { itens, status: fd.get('status') }), 'pedido');
+        closeModal(); toast('Pedido aprovado — remessa criada');
+      } } });
+  },
+  recusarPedido: (el) => modal({ title: 'Recusar pedido', body: '<form id="frec"><label class="field"><span>Motivo (o parceiro verá)</span><input class="input" name="motivo" maxlength="200"></label></form>',
+    foot: '<button class="btn ghost" data-act="close">Voltar</button><button class="btn" data-act="ok">Recusar</button>',
+    handlers: { ok: () => { const m = new FormData(document.getElementById('frec')).get('motivo'); store.commit((st) => D.recusarPedido(st, el.dataset.id, m)); closeModal(); toast('Pedido recusado'); } } }),
   formaFech: (el) => { const v = el.value.replace(' (fora do cadastro)', ''); store.commit((st) => { st.fechamentos.find((x) => x.id === el.dataset.id).formaPagamento = v; }); toast(`Forma de pagamento: ${v}`); },
   avancarRem: (el) => {
     const st = el.dataset.st;
@@ -918,8 +1027,9 @@ async function aposEntrar() {
 }
 
 store.subscribe((s, msg, externo) => {
-  if (!S()) return;
+  if (!S() || !current.view) return; // ainda carregando
   if (externo && msg === 'fechamento') toast('Novo fechamento recebido de um parceiro');
+  if (externo && msg === 'pedidos') toast('Novo pedido de reposição recebido');
   if (current.pattern === '/novo-fechamento/:cid' && externo) return;
   if (document.querySelector('.overlay') && externo) return; // não fechar formulários abertos
   rerender();
