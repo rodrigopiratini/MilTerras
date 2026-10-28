@@ -19,6 +19,7 @@ export function criarNuvem(app, hooks) {
   let enviando = false;
   let fila = lerFila();
   let status = 'online';
+  const ehGestor = () => perfil?.papel === 'gestor' || perfil?.papel === 'dono';
 
   function lerFila() { try { return JSON.parse(localStorage.getItem(OUTBOX) || '[]'); } catch { return []; } }
   function salvarFila() { try { localStorage.setItem(OUTBOX, JSON.stringify(fila)); } catch {} }
@@ -40,7 +41,7 @@ export function criarNuvem(app, hooks) {
   }
 
   async function carregar() {
-    const gestor = perfil?.papel === 'gestor';
+    const gestor = ehGestor();
     const [cfg, ...docs] = await Promise.all([buscarTudo('config'), ...TABELAS.map((t) => (t === 'despesas' && !gestor ? [] : buscarTudo(t)))]);
     const custos = gestor ? Object.fromEntries((await buscarTudo('custos', 'id,custo')).map((r) => [r.id, +r.custo])) : {};
     state = { meta: { ...(cfg.find((r) => r.id === 'geral')?.data || {}), demo: false } };
@@ -76,7 +77,7 @@ export function criarNuvem(app, hooks) {
           const { custo, ...resto } = doc;
           data = resto;
           const antigo = antes ? JSON.parse(antes) : {};
-          if (perfil?.papel === 'gestor' && custo !== antigo.custo) ops.push({ tabela: 'custos', op: 'upsert', id, custo: +custo || 0 });
+          if (ehGestor() && custo !== antigo.custo) ops.push({ tabela: 'custos', op: 'upsert', id, custo: +custo || 0 });
           if (antes && JSON.stringify(resto) === JSON.stringify((({ custo: _, ...r }) => r)(antigo))) continue;
         }
         ops.push({ tabela: t, op: antes ? 'update' : 'insert', id, data });
@@ -84,7 +85,7 @@ export function criarNuvem(app, hooks) {
       for (const id of snap[t].keys()) if (!atual.has(id)) ops.push({ tabela: t, op: 'delete', id });
     }
     const metaJ = JSON.stringify(state.meta);
-    if (metaJ !== snap.meta && perfil?.papel === 'gestor') { const { demo, ...data } = state.meta; ops.push({ tabela: 'config', op: 'upsert', id: 'geral', data }); }
+    if (metaJ !== snap.meta && ehGestor()) { const { demo, ...data } = state.meta; ops.push({ tabela: 'config', op: 'upsert', id: 'geral', data }); }
     // custos precisam do produto já gravado
     ops.sort((a, b) => (a.tabela === 'custos') - (b.tabela === 'custos'));
     fotografar();
@@ -156,7 +157,7 @@ export function criarNuvem(app, hooks) {
         const i = arr.findIndex((x) => x.id === id);
         if (p.eventType === 'DELETE') { if (i < 0) return; arr.splice(i, 1); snap[t].delete(id); hooks.onChange?.(t, true); return; }
         const doc = p.new.data;
-        if (t === 'produtos') { if (perfil?.papel === 'gestor') doc.custo = i >= 0 ? arr[i].custo : 0; }
+        if (t === 'produtos') { if (ehGestor()) doc.custo = i >= 0 ? arr[i].custo : 0; }
         const j = JSON.stringify(doc);
         if (snap[t].get(id) === j) return; // eco da própria gravação
         const antes = i >= 0 ? arr[i] : null;
@@ -238,6 +239,7 @@ export function criarNuvem(app, hooks) {
       await sb.auth.signOut();
       perfil = null; state = null;
     },
+    rpc: async (fn, args) => { const { data, error } = await sb.rpc(fn, args); if (error) throw new Error(error.message); return data; },
     recarregar: async () => { await carregar(); hooks.onChange?.('recarregado', true); },
   };
 }

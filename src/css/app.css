@@ -287,3 +287,19 @@ a.li, .li.click { color: inherit; cursor: pointer; }
 
 .wz-foot { position: sticky; bottom: 0; background: var(--creme); padding: 12px 0; margin-top: 16px; border-top: 1px solid var(--line); z-index: 5; }
 @media (max-width: 900px) { .wz-foot { bottom: calc(64px + var(--safe-b)); } .wz-foot .btn { padding: 12px 14px; } }
+
+.money-in { position: relative; display: inline-block; max-width: 100%; }
+.money-in > span { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: var(--ink-3); font-size: 13px; pointer-events: none; }
+.money-in .input { padding-left: 34px; text-align: right; }
+.field .money-in { width: 100% !important; }
+.hb.click { cursor: pointer; border-radius: 8px; margin: -4px -6px; padding: 4px 6px; }
+.hb.click:hover { background: var(--surface-2); }
+.just { margin-top: 8px; width: 100%; font-size: 14px; padding: 8px 10px; }
+.just.falta { border-color: var(--crit); background: var(--crit-bg); }
+.ajuste-box { margin-top: 4px; font-size: 12.5px; background: var(--warn-bg); color: var(--warn); border-radius: 8px; padding: 6px 9px; }
+
+.kanban { display: grid; grid-template-columns: repeat(4, minmax(240px, 1fr)); gap: 14px; overflow-x: auto; padding-bottom: 8px; -webkit-overflow-scrolling: touch; scroll-snap-type: x mandatory; }
+.kcol { background: var(--surface-2); border-radius: var(--radius); padding: 10px; display: flex; flex-direction: column; gap: 10px; min-height: 160px; scroll-snap-align: start; }
+.khead { display: flex; justify-content: space-between; align-items: center; padding: 2px 4px; }
+.kcard { padding: 12px; }
+@media (max-width: 900px) { .kanban { grid-template-columns: repeat(4, 82vw); } }

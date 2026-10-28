@@ -126,9 +126,22 @@ export const thumb = (p, cls = '') => `<img class="thumb ${cls}" src="${asset(p.
 export const stepper = (name, value, { min = 0, max = 999 } = {}) =>
   `<span class="stepper"><button type="button" data-act="step" data-d="-1" aria-label="Menos">−</button><input type="number" inputmode="numeric" data-onchange="qty" name="${name}" value="${value}" min="${min}" max="${max}"><button type="button" data-act="step" data-d="1" aria-label="Mais">+</button></span>`;
 
+// Campos de valor em reais com máscara (digita só números: 1234 → 12,34)
+export const fmtMoneyInput = (v) => (Math.round((+v || 0) * 100) / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+export const parseMoney = (str) => { const d = String(str ?? '').replace(/\D/g, ''); return d ? +d / 100 : 0; };
+export const moneyInput = (name, value, { width = 130, extra = '' } = {}) =>
+  `<span class="money-in" style="width:${width}px"><span>R$</span><input class="input num" name="${name}" inputmode="numeric" autocomplete="off" data-money value="${fmtMoneyInput(value)}" ${extra}></span>`;
+document.addEventListener('input', (e) => {
+  const el = e.target;
+  if (!el.matches?.('input[data-money]')) return;
+  el.value = fmtMoneyInput(parseMoney(el.value));
+  try { el.setSelectionRange(el.value.length, el.value.length); } catch {}
+});
+document.addEventListener('focusin', (e) => { if (e.target.matches?.('input[data-money]')) setTimeout(() => { try { e.target.setSelectionRange(e.target.value.length, e.target.value.length); } catch {} }, 0); });
+
 export function stepHandler(el) {
   const inp = el.parentElement.querySelector('input');
-  const v = Math.max(+inp.min || 0, Math.min(+inp.max || 999, (+inp.value || 0) + +el.dataset.d));
+  const v = Math.max(+inp.min || 0, Math.min(inp.max === '' ? 999 : +inp.max, (+inp.value || 0) + +el.dataset.d));
   inp.value = v;
   inp.dispatchEvent(new Event('change', { bubbles: true }));
 }
@@ -156,7 +169,8 @@ export const qtdBadge = (q) => `<span class="badge ${q <= 0 ? 'crit' : q <= 2 ? 
 
 export function waLink(numero, texto) {
   const n = String(numero || '').replace(/\D/g, '');
-  return `https://wa.me/${n.length <= 11 ? '55' + n : n}?text=${encodeURIComponent(texto)}`;
+  const dest = !n ? '' : n.length <= 11 ? '55' + n : n; // sem número: o WhatsApp pede para escolher o contato
+  return `https://wa.me/${dest}?text=${encodeURIComponent(texto)}`;
 }
 
 export function download(nome, conteudo, tipo = 'application/json') {

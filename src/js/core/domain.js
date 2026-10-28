@@ -12,6 +12,7 @@ export const TIPOS_MOV = {
   venda_direta: { label: 'Venda direta', central: -1, cliente: 0 },
   perda: { label: 'Perda / quebra', central: -1, cliente: 0 },
   ajuste: { label: 'Ajuste de inventário', central: +1, cliente: 0 },
+  ajuste_parceiro: { label: 'Correção de saldo no parceiro', central: 0, cliente: +1 }, // qtd com sinal
 };
 
 export const STATUS_FECH = {
@@ -20,6 +21,16 @@ export const STATUS_FECH = {
   aprovado: { label: 'A receber', tone: 'info' },
   pago: { label: 'Pago', tone: 'ok' },
 };
+
+// Entrega das remessas: o estoque central baixa na criação (reserva); o saldo do parceiro
+// só aumenta quando a remessa é marcada como entregue.
+export const STATUS_ENTREGA = {
+  a_separar: { label: 'A separar', tone: 'warn', prox: 'separado', acao: 'Marcar separado' },
+  separado: { label: 'Separado', tone: 'info', prox: 'em_rota', acao: 'Saiu para entrega' },
+  em_rota: { label: 'Em rota', tone: 'info', prox: 'entregue', acao: 'Confirmar entrega' },
+  entregue: { label: 'Entregue', tone: 'ok' },
+};
+const entregue = (mv) => mv.tipo !== 'remessa' || !mv.entrega || mv.entrega === 'entregue';
 
 export const FORMAS_PAGAMENTO = ['PIX', 'Boleto', 'Transferência', 'Cartão de crédito', 'Dinheiro'];
 
@@ -40,7 +51,7 @@ export function consignado(s) {
   const m = {};
   for (const mv of s.movs) {
     const f = TIPOS_MOV[mv.tipo].cliente;
-    if (!f || !mv.clienteId) continue;
+    if (!f || !mv.clienteId || !entregue(mv)) continue;
     const c = (m[mv.clienteId] ||= {});
     c[mv.produtoId] = (c[mv.produtoId] || 0) + mv.qtd * f;
   }
@@ -52,6 +63,39 @@ export const saldoCliente = (s, cid) => consignado(s)[cid] || {};
 export function addMov(s, mv) {
   const m = { id: uid('mv'), data: today(), ...mv };
   s.movs.push(m);
+  return m;
+}
+
+// Remessas agrupadas (só as criadas com controle de entrega)
+export function remessas(s) {
+  const g = {};
+  for (const m of s.movs) {
+    if (m.tipo !== 'remessa' || !m.remessaId) continue;
+    const r = (g[m.remessaId] ||= { id: m.remessaId, clienteId: m.clienteId, data: m.data, status: m.entrega || 'entregue', itens: [], ref: m.ref, obs: m.obs, hist: m.entregaHist || [], entregueEm: m.entregueEm, recebidoPor: m.recebidoPor });
+    r.itens.push({ produtoId: m.produtoId, qtd: m.qtd, movId: m.id });
+  }
+  return Object.values(g).map((r) => ({ ...r, garrafas: sum(r.itens, (i) => i.qtd) })).sort((a, b) => (a.data + a.id < b.data + b.id ? 1 : -1));
+}
+
+export function criarRemessa(s, { clienteId, itens, status = 'a_separar', data = today(), ref, obs }) {
+  const remessaId = uid('rm');
+  const hist = [{ status, em: new Date().toISOString() }];
+  for (const { produtoId, qtd } of itens) if (qtd > 0) addMov(s, { data, tipo: 'remessa', produtoId, qtd, clienteId, ref, obs, remessaId, entrega: status, entregaHist: hist, ...(status === 'entregue' ? { entregueEm: data } : {}) });
+  return remessaId;
+}
+
+export function avancarRemessa(s, remessaId, status, { recebidoPor, data = today() } = {}) {
+  for (const m of s.movs) {
+    if (m.remessaId !== remessaId) continue;
+    m.entrega = status;
+    m.entregaHist = [...(m.entregaHist || []), { status, em: new Date().toISOString() }];
+    if (status === 'entregue') { m.entregueEm = data; if (recebidoPor) m.recebidoPor = recebidoPor; }
+  }
+}
+
+export function emTransito(s) {
+  const m = {};
+  for (const mv of s.movs) if (!entregue(mv)) m[mv.produtoId] = (m[mv.produtoId] || 0) + mv.qtd;
   return m;
 }
 
@@ -118,7 +162,7 @@ export function sugestaoReposicao(s, cid, contagem) {
   return out;
 }
 
-export function montarFechamento(s, cid, { contagem, reposicao = {}, forma, obs = '', criadoPor = 'cliente', data = today() }) {
+export function montarFechamento(s, cid, { contagem, reposicao = {}, forma, obs = '', criadoPor = 'cliente', data = today(), esperado = {}, justificativas = {} }) {
   const c = cliente(s, cid);
   const per = periodoAtual(s, cid);
   const saldo = saldoCliente(s, cid);
@@ -130,16 +174,23 @@ export function montarFechamento(s, cid, { contagem, reposicao = {}, forma, obs 
       const cont = Math.min(saldoAnterior, Math.max(0, contagem[pid] ?? saldoAnterior));
       const vendido = saldoAnterior - cont;
       const preco = produto(s, pid).preco;
-      return {
+      const item = {
         produtoId: pid, saldoAnterior, contagem: cont, vendido, preco, valor: vendido * preco,
         registrado: sum(registradas.filter((v) => v.produtoId === pid), (v) => v.qtd),
       };
+      // contagem diferente do esperado pelo app → ajuste com justificativa
+      if (esperado[pid] !== undefined) {
+        item.esperado = esperado[pid];
+        if (cont !== esperado[pid]) item.justificativa = (justificativas[pid] || '').trim();
+      }
+      return item;
     });
   return {
     id: uid('fc'), clienteId: cid, inicio: per.inicio, fim: data, status: 'enviado', criadoPor,
     itens, total: sum(itens, (i) => i.valor), garrafas: sum(itens, (i) => i.vendido),
     reposicao: Object.entries(reposicao).filter(([, q]) => q > 0).map(([produtoId, qtd]) => ({ produtoId, qtd })),
     formaPagamento: forma || c.formaPadrao, obs, enviadoEm: data, ts: Date.now(),
+    ajustes: itens.filter((i) => i.esperado !== undefined && i.contagem !== i.esperado).length,
   };
 }
 
@@ -161,12 +212,12 @@ export function aprovarFechamento(s, id, { data = today(), reposicao } = {}) {
     const q = Math.min(r.qtd, disp);
     if (q < r.qtd) avisos.push(`${produto(s, r.produtoId).nome}: só havia ${disp} no estoque central`);
     if (q > 0) {
-      addMov(s, { data, tipo: 'remessa', produtoId: r.produtoId, qtd: q, clienteId: c.id, ref: f.id });
       central[r.produtoId] -= q;
       f.reposicaoEnviada.push({ produtoId: r.produtoId, qtd: q });
-      c.par[r.produtoId] = Math.max(c.par[r.produtoId] || 0, 1);
+      (c.par ||= {})[r.produtoId] = Math.max(c.par[r.produtoId] || 0, 1);
     }
   }
+  if (f.reposicaoEnviada.length) f.remessaId = criarRemessa(s, { clienteId: c.id, itens: f.reposicaoEnviada, data, ref: f.id, obs: 'Reposição do fechamento' });
   f.status = f.total > 0 ? 'aprovado' : 'pago';
   f.aprovadoEm = data;
   f.vencimento = addDays(data, c.prazoDias);
@@ -221,6 +272,13 @@ export function contasReceber(s) {
   return s.fechamentos.filter((f) => f.status === 'aprovado')
     .map((f) => ({ ...f, atraso: Math.max(0, diffDays(t, f.vencimento)) }))
     .sort((a, b) => (a.vencimento < b.vencimento ? -1 : 1));
+}
+
+// Custo médio de todos os rótulos de uma vez (evita recalcular dentro de laços)
+export function custosMedios(s) {
+  const q = {}, v = {};
+  for (const m of s.movs) if (m.tipo === 'entrada' && m.custoUnit) { q[m.produtoId] = (q[m.produtoId] || 0) + m.qtd; v[m.produtoId] = (v[m.produtoId] || 0) + m.qtd * m.custoUnit; }
+  return Object.fromEntries(s.produtos.map((p) => [p.id, q[p.id] ? v[p.id] / q[p.id] : p.custo || 0]));
 }
 
 export function custoMedio(s, pid) {
@@ -320,7 +378,7 @@ export function insights(s) {
   const out = [];
   for (const f of s.fechamentos.filter((x) => x.status === 'enviado')) {
     const c = cliente(s, f.clienteId);
-    out.push({ nivel: 'acao', icone: 'inbox', titulo: `${c.nome} enviou o fechamento`, texto: `${f.garrafas} garrafas vendidas · aguardando sua conferência`, link: `#/fechamento/${f.id}` });
+    out.push({ nivel: 'acao', icone: 'inbox', titulo: `${c.nome} enviou o fechamento`, texto: `${f.garrafas} garrafas vendidas${f.ajustes ? ` · ${f.ajustes} ajuste(s) de contagem justificado(s)` : ''} · aguardando sua conferência`, link: `#/fechamento/${f.id}` });
   }
   for (const r of contasReceber(s).filter((x) => x.atraso > 0)) {
     const c = cliente(s, r.clienteId);
@@ -328,6 +386,10 @@ export function insights(s) {
   }
   for (const x of coberturaCentral(s)) {
     if (x.dias < 45 && x.produto.ativo) out.push({ nivel: x.dias < 20 ? 'critico' : 'atencao', icone: 'box', titulo: x.estoque <= 0 ? `${x.produto.nome}: esgotado no estoque central` : `${x.produto.nome}: estoque para ~${Math.floor(x.dias)} dias`, texto: `${x.estoque} garrafas no estoque central, giro de ${(x.giro * 30).toFixed(0)}/mês. Programe nova importação.`, link: `#/estoque` });
+  }
+  for (const r of remessas(s).filter((x) => x.status !== 'entregue')) {
+    const dias = diffDays(t, r.data);
+    if (dias >= 2) out.push({ nivel: 'atencao', icone: 'truck', titulo: `Remessa ${{ a_separar: 'a separar', separado: 'separada', em_rota: 'em rota' }[r.status]} há ${dias} dias`, texto: `${cliente(s, r.clienteId)?.nome} · ${r.garrafas} garrafas`, link: '#/remessas' });
   }
   for (const c of s.clientes.filter((x) => x.ativo)) {
     const per = periodoAtual(s, c.id);

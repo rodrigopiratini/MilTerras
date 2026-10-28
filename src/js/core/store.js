@@ -81,6 +81,9 @@ export const entrarParceiro = (c, p) => nuvem.entrarParceiro(c, p);
 export const sair = () => nuvem?.sair();
 export const sessaoAtiva = async () => !!(await nuvem?.sb.auth.getSession())?.data?.session;
 export const recarregar = () => nuvem?.recarregar();
+export const rpc = (fn, args) => nuvem.rpc(fn, args);
+export const ehGestor = () => ['dono', 'gestor'].includes(nuvem?.perfil?.papel);
+export const ehDono = () => nuvem?.perfil?.papel === 'dono';
 
 // Somente modo local (demonstração)
 export function reset() { state = seed(); persist(); avisar(); channel?.postMessage({ type: 'changed' }); }

@@ -134,7 +134,15 @@ export function seed({ vazio = false } = {}) {
         if (pendenteAgora) { f.reposicao = Object.entries(reposicao).filter(([, q]) => q > 0).map(([produtoId, qtd]) => ({ produtoId, qtd })); continue; }
         const aprov = addDays(d, idade > 1 ? 1 : 0);
         D.aprovarFechamento(s, f.id, { data: aprov });
-        for (const rp of f.reposicaoEnviada) fisico[c.id][rp.produtoId] = (fisico[c.id][rp.produtoId] || 0) + rp.qtd;
+        // reposições entregues no dia; as mais recentes de alguns parceiros ficam em andamento (demonstração)
+        if (f.remessaId) {
+          const andamento = idade <= 6 && (c.id === 'cl3' || c.id === 'cl6') ? (c.id === 'cl3' ? 'separado' : 'a_separar') : null;
+          if (andamento) D.avancarRemessa(s, f.remessaId, andamento);
+          else {
+            D.avancarRemessa(s, f.remessaId, 'separado'); D.avancarRemessa(s, f.remessaId, 'em_rota'); D.avancarRemessa(s, f.remessaId, 'entregue', { data: aprov, recebidoPor: c.contato.split(' ')[0] });
+            for (const rp of f.reposicaoEnviada) fisico[c.id][rp.produtoId] = (fisico[c.id][rp.produtoId] || 0) + rp.qtd;
+          }
+        }
         // Pagamentos: a maioria paga em dia; a Taverna está com um título vencido
         const pagaEm = addDays(aprov, Math.max(0, c.prazoDias - 2 + Math.floor(r() * 4)));
         const atrasado = c.id === 'cl6' && idade < 30 && idade > 12;

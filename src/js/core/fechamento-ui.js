@@ -2,14 +2,14 @@
 // 1. Contagem física  2. Reposição e novos rótulos  3. Pagamento e envio
 import * as D from './domain.js';
 import { money, int, date, addDays, today, esc, sum, plural } from './fmt.js';
-import { icon, thumb, stepper, badge } from './ui.js';
+import { icon, thumb, stepper, badge, toast as toastUI } from './ui.js';
 
 export function novoWizard(s, cid) {
   const est = D.saldoEstimado(s, cid);
   const saldo = D.saldoCliente(s, cid);
   const contagem = {};
   for (const pid of Object.keys(saldo)) if (saldo[pid] > 0) contagem[pid] = est[pid] ?? 0;
-  return { cid, step: 1, contagem, repo: null, forma: D.cliente(s, cid).formaPadrao, obs: '' };
+  return { cid, step: 1, contagem, esperado: { ...contagem }, just: {}, repo: null, forma: D.cliente(s, cid).formaPadrao, obs: '' };
 }
 
 function totais(s, w) {
@@ -37,16 +37,20 @@ export function renderWizard(s, w, { modo = 'cliente' } = {}) {
   let body = '';
   if (w.step === 1) {
     const pids = Object.keys(w.contagem);
-    body = `<p class="small ink2" style="margin-top:0">Conte as garrafas Mil Terras que estão no estabelecimento agora. Já deixamos preenchido o que o sistema espera, a partir das vendas lançadas no app.</p>
+    const transito = D.remessas(s).filter((r) => r.clienteId === w.cid && r.status !== 'entregue');
+    body = `<p class="small ink2" style="margin-top:0">Conte as garrafas Mil Terras que estão no estabelecimento agora. Já deixamos preenchido o que o sistema espera, a partir das vendas lançadas no app. <b>Se a contagem for diferente do esperado, informe o motivo.</b></p>
+    ${transito.length ? `<div class="ajuste-box mb">${icon('truck')} Há ${plural(sum(transito, (r) => r.garrafas), 'garrafa')} em reposição ainda não entregue: não conte essas garrafas.</div>` : ''}
     <div class="card pad-0"><div class="list" style="padding:0 14px">${pids.map((pid) => {
       const p = D.produto(s, pid);
       const reg = sum(vendas.filter((v) => v.produtoId === pid), (v) => v.qtd);
-      const esperado = est[pid] ?? 0;
+      const esperado = w.esperado[pid] ?? est[pid] ?? 0;
       const dif = esperado - w.contagem[pid];
+      const falta = dif !== 0 && w.tentou && (w.just[pid] || '').trim().length < 3;
       const vend = (saldo[pid] || 0) - w.contagem[pid];
       return `<div class="li">${thumb(p, 'sm')}<div class="grow"><div class="t">${esc(p.nome)}</div>
         <div class="s">Saldo ${saldo[pid]} · lançadas ${reg} · esperado <b>${esperado}</b></div>
         <div class="s" style="color:var(--bordo)">Vendidas: <b>${vend}</b> · ${money(vend * p.preco)}${dif > 0 ? ` · <span style="color:var(--warn)">${dif} sem lançamento</span>` : dif < 0 ? ` · <span style="color:var(--crit)">${-dif} a mais que o esperado</span>` : ''}</div></div>
+        ${dif !== 0 ? `<input class="input just ${falta ? 'falta' : ''}" name="just:${pid}" data-onchange="just" maxlength="200" placeholder="Motivo da diferença de ${Math.abs(dif)} (${dif > 0 ? 'faltam' : 'sobram'} garrafas) — obrigatório" value="${esc(w.just[pid] || '')}">` : ''}</div>
         ${stepper('cont:' + pid, w.contagem[pid], { max: saldo[pid] || 0 })}</div>`;
     }).join('')}</div></div>`;
   }
@@ -90,27 +94,37 @@ export function renderWizard(s, w, { modo = 'cliente' } = {}) {
 }
 
 // Liga eventos do assistente. onDone(f) recebe o fechamento criado.
-export function wizardHandlers(w, rerender, commit, onDone, modo = 'cliente') {
+let toastFn = toastUI;
+export function wizardHandlers(w, rerender, commit, onDone, modo = 'cliente', toast) {
+  if (toast) toastFn = toast;
   return {
-    step: (el) => { const inp = el.parentElement.querySelector('input'); inp.value = Math.max(0, Math.min(+inp.max || 999, (+inp.value || 0) + +el.dataset.d)); read(inp); },
+    step: (el) => { const inp = el.parentElement.querySelector('input'); inp.value = Math.max(0, Math.min(inp.max === '' ? 999 : +inp.max, (+inp.value || 0) + +el.dataset.d)); read(inp); },
+    just: (el) => { w.just[el.name.split(':')[1]] = el.value; },
     qty: (el) => read(el),
     obs: (el) => { w.obs = el.value; },
     forma: (el) => { w.forma = el.dataset.v; rerender(); },
     'wz-back': () => { w.step--; rerender(); scrollTo(0, 0); },
-    'wz-next': () => { w.step++; rerender(); scrollTo(0, 0); },
+    'wz-next': () => {
+      document.querySelectorAll('input[name^="just:"]').forEach((el) => { w.just[el.name.split(':')[1]] = el.value; });
+      if (w.step === 1) {
+        const pend = Object.keys(w.contagem).filter((pid) => w.contagem[pid] !== w.esperado[pid] && (w.just[pid] || '').trim().length < 3);
+        if (pend.length) { w.tentou = true; rerender(); document.querySelector('.just.falta')?.focus(); return toastFn?.(`Justifique a diferença de contagem (${pend.length} rótulo${pend.length > 1 ? 's' : ''})`); }
+      }
+      w.step++; rerender(); scrollTo(0, 0);
+    },
     'wz-send': () => finish(false),
     'wz-approve': () => finish(true),
   };
   function read(inp) {
     const [k, pid] = inp.name.split(':');
-    const v = Math.max(0, +inp.value || 0);
+    const v = Math.max(0, Math.min(inp.max === '' ? 999 : +inp.max, +inp.value || 0));
     if (k === 'cont') { w.contagem[pid] = v; w.repo = null; } else w.repo[pid] = v;
     rerender();
   }
   function finish(aprovar) {
     let f;
     commit((s) => {
-      f = D.montarFechamento(s, w.cid, { contagem: w.contagem, reposicao: w.repo || {}, forma: w.forma, obs: w.obs, criadoPor: modo });
+      f = D.montarFechamento(s, w.cid, { contagem: w.contagem, reposicao: w.repo || {}, forma: w.forma, obs: w.obs, criadoPor: modo, esperado: w.esperado, justificativas: w.just });
       D.enviarFechamento(s, f);
       if (aprovar) f.avisos = D.aprovarFechamento(s, f.id);
     }, 'fechamento');
@@ -119,3 +133,13 @@ export function wizardHandlers(w, rerender, commit, onDone, modo = 'cliente') {
 }
 
 export const statusBadge = (f) => badge(D.STATUS_FECH[f.status].label + (f.status === 'aprovado' && f.vencimento < today() ? ' · vencido' : ''), f.status === 'aprovado' && f.vencimento < today() ? 'crit' : D.STATUS_FECH[f.status].tone);
+
+// Lista de ajustes de contagem com justificativa (Gestão e Parceiro)
+export function ajustesHTML(s, f) {
+  const aj = f.itens.filter((i) => i.esperado !== undefined && i.contagem !== i.esperado);
+  if (!aj.length) return '';
+  return `<div class="card mt" style="border-left:3px solid var(--warn)"><div class="head"><h2>${icon('alert')} Ajustes de contagem (${aj.length})</h2></div>
+    <div class="list">${aj.map((i) => { const d = i.contagem - i.esperado; return `<div class="li"><div class="grow"><div class="t">${esc(D.produto(s, i.produtoId).nome)}</div>
+      <div class="s">Esperado ${i.esperado} · contado ${i.contagem} · <b style="color:${d < 0 ? 'var(--crit)' : 'var(--warn)'}">${d > 0 ? '+' : ''}${d}</b></div>
+      <div class="small" style="margin-top:4px">“${esc(i.justificativa || 'sem justificativa')}”</div></div></div>`; }).join('')}</div></div>`;
+}

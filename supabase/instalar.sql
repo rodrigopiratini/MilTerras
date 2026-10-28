@@ -77,9 +77,26 @@ create table if not exists public.despesas (
 
 create table if not exists public.perfis (
   user_id uuid primary key references auth.users(id) on delete cascade,
-  papel text not null check (papel in ('gestor', 'parceiro')),
+  papel text not null,
   cliente_id text references public.clientes(id) on delete cascade,
   criado_em timestamptz not null default now()
+);
+-- papéis: dono (administra a equipe), gestor (opera tudo, sem administrar usuários), parceiro
+alter table public.perfis drop constraint if exists perfis_papel_check;
+alter table public.perfis add constraint perfis_papel_check check (papel in ('dono', 'gestor', 'parceiro'));
+-- instalações anteriores: o primeiro gestor vira dono
+update public.perfis set papel = 'dono'
+ where user_id = (select user_id from public.perfis where papel = 'gestor' order by criado_em limit 1)
+   and not exists (select 1 from public.perfis where papel = 'dono');
+
+create table if not exists public.convites (           -- convites de gestor (gerados pelo dono)
+  codigo text primary key,
+  nome text,
+  criado_por uuid references auth.users(id) on delete set null,
+  criado_em timestamptz not null default now(),
+  expira_em timestamptz not null default now() + interval '7 days',
+  usado_por uuid references auth.users(id) on delete set null,
+  usado_em timestamptz
 );
 create index if not exists perfis_cliente_idx on public.perfis (cliente_id);
 
@@ -100,7 +117,11 @@ on conflict (id) do nothing;
 -- ---------- Funções auxiliares ----------
 create or replace function public.eh_gestor() returns boolean
 language sql stable security definer set search_path = public as
-$$ select exists (select 1 from public.perfis where user_id = auth.uid() and papel = 'gestor') $$;
+$$ select exists (select 1 from public.perfis where user_id = auth.uid() and papel in ('gestor', 'dono')) $$;
+
+create or replace function public.eh_dono() returns boolean
+language sql stable security definer set search_path = public as
+$$ select exists (select 1 from public.perfis where user_id = auth.uid() and papel = 'dono') $$;
 
 create or replace function public.meu_cliente() returns text
 language sql stable security definer set search_path = public as
@@ -175,7 +196,7 @@ begin
     return null;
   end if;
   delete from public.tentativas_login where codigo = v_codigo;
-  if exists (select 1 from public.perfis where user_id = auth.uid() and papel = 'gestor') then
+  if exists (select 1 from public.perfis where user_id = auth.uid() and papel in ('gestor', 'dono')) then
     raise exception 'Este aparelho está conectado como gestor. Saia antes de entrar como parceiro.';
   end if;
   insert into public.perfis (user_id, papel, cliente_id) values (auth.uid(), 'parceiro', v_cliente)
@@ -183,19 +204,64 @@ begin
   return v_cliente;
 end $$;
 
--- Gestor: primeiro acesso com o código de instalação (depois pode convidar outros gestores)
+-- Gestão: o código de instalação cria o DONO (só enquanto não houver dono);
+-- depois disso, novos gestores entram apenas com convite gerado pelo dono.
 create or replace function public.tornar_gestor(p_codigo text) returns boolean
 language plpgsql security definer set search_path = public as $$
+declare
+  v_codigo text := upper(trim(p_codigo));
+  v_conv public.convites;
 begin
   if auth.uid() is null or coalesce((auth.jwt()->>'is_anonymous')::boolean, false) then
     raise exception 'Entre com e-mail e senha';
   end if;
-  if not exists (select 1 from public.instalacao where codigo_setup = upper(trim(p_codigo))) then
-    return false;
+  if exists (select 1 from public.perfis where user_id = auth.uid() and papel in ('gestor', 'dono')) then return true; end if;
+  if not exists (select 1 from public.perfis where papel = 'dono')
+     and exists (select 1 from public.instalacao where codigo_setup = v_codigo) then
+    insert into public.perfis (user_id, papel) values (auth.uid(), 'dono')
+      on conflict (user_id) do update set papel = 'dono', cliente_id = null;
+    return true;
   end if;
+  select * into v_conv from public.convites where codigo = v_codigo and usado_por is null and expira_em > now() for update;
+  if v_conv.codigo is null then return false; end if;
+  update public.convites set usado_por = auth.uid(), usado_em = now() where codigo = v_codigo;
   insert into public.perfis (user_id, papel) values (auth.uid(), 'gestor')
     on conflict (user_id) do update set papel = 'gestor', cliente_id = null;
   return true;
+end $$;
+
+create or replace function public.criar_convite(p_nome text) returns text
+language plpgsql security definer set search_path = public as $$
+declare v_codigo text := upper(encode(gen_random_bytes(5), 'hex'));
+begin
+  if not public.eh_dono() then raise exception 'Somente o dono pode convidar gestores'; end if;
+  insert into public.convites (codigo, nome, criado_por) values (v_codigo, nullif(trim(p_nome), ''), auth.uid());
+  return v_codigo;
+end $$;
+
+create or replace function public.equipe() returns json
+language plpgsql stable security definer set search_path = public as $$
+begin
+  if not public.eh_gestor() then raise exception 'Sem permissão'; end if;
+  return json_build_object(
+    'membros', coalesce((select json_agg(json_build_object('userId', p.user_id, 'papel', p.papel, 'email', u.email, 'desde', p.criado_em, 'eu', p.user_id = auth.uid()) order by p.criado_em)
+                         from public.perfis p join auth.users u on u.id = p.user_id where p.papel in ('dono', 'gestor')), '[]'::json),
+    'convites', case when public.eh_dono() then coalesce((select json_agg(json_build_object('codigo', codigo, 'nome', nome, 'expira', expira_em) order by criado_em desc)
+                         from public.convites where usado_por is null and expira_em > now()), '[]'::json) else '[]'::json end);
+end $$;
+
+create or replace function public.remover_gestor(p_user uuid) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  if not public.eh_dono() then raise exception 'Somente o dono pode remover gestores'; end if;
+  delete from public.perfis where user_id = p_user and papel = 'gestor';
+end $$;
+
+create or replace function public.cancelar_convite(p_codigo text) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  if not public.eh_dono() then raise exception 'Sem permissão'; end if;
+  delete from public.convites where codigo = upper(p_codigo) and usado_por is null;
 end $$;
 
 create or replace function public.meu_perfil() returns json
@@ -204,8 +270,13 @@ $$ select json_build_object('papel', papel, 'clienteId', cliente_id) from public
 
 revoke all on function public.vincular_parceiro(text, text) from public, anon;
 revoke all on function public.tornar_gestor(text) from public, anon;
+revoke all on function public.criar_convite(text) from public, anon;
+revoke all on function public.equipe() from public, anon;
+revoke all on function public.remover_gestor(uuid) from public, anon;
+revoke all on function public.cancelar_convite(text) from public, anon;
 grant execute on function public.vincular_parceiro(text, text) to authenticated;
 grant execute on function public.tornar_gestor(text) to authenticated;
+grant execute on function public.criar_convite(text), public.equipe(), public.remover_gestor(uuid), public.cancelar_convite(text) to authenticated;
 grant execute on function public.meu_perfil() to authenticated;
 
 -- ---------- Row Level Security ----------
@@ -220,6 +291,7 @@ alter table public.despesas enable row level security;
 alter table public.perfis enable row level security;
 alter table public.tentativas_login enable row level security;
 alter table public.instalacao enable row level security;
+alter table public.convites enable row level security;
 
 do $$ declare r record; begin
   for r in select policyname, tablename from pg_policies where schemaname = 'public' and policyname like 'mt_%' loop
@@ -236,7 +308,8 @@ create policy mt_gestor on public.movs        for all to authenticated using (pu
 create policy mt_gestor on public.vendas      for all to authenticated using (public.eh_gestor()) with check (public.eh_gestor());
 create policy mt_gestor on public.fechamentos for all to authenticated using (public.eh_gestor()) with check (public.eh_gestor());
 create policy mt_gestor on public.despesas    for all to authenticated using (public.eh_gestor()) with check (public.eh_gestor());
-create policy mt_gestor on public.perfis      for all to authenticated using (public.eh_gestor()) with check (public.eh_gestor());
+create policy mt_gestor_le_perfis on public.perfis for select to authenticated using (public.eh_gestor());
+create policy mt_dono_perfis on public.perfis for all to authenticated using (public.eh_dono() and papel <> 'dono') with check (public.eh_dono() and papel <> 'dono');
 
 -- parceiro
 create policy mt_parceiro_config   on public.config      for select to authenticated using (public.meu_cliente() is not null);
@@ -250,7 +323,7 @@ create policy mt_parceiro_fech_ins on public.fechamentos for insert to authentic
 create policy mt_proprio_perfil    on public.perfis      for select to authenticated using (user_id = auth.uid());
 
 grant select, insert, update, delete on public.config, public.produtos, public.custos, public.clientes, public.movs, public.vendas, public.fechamentos, public.despesas, public.perfis to authenticated;
-revoke all on public.instalacao, public.tentativas_login from anon, authenticated;
+revoke all on public.instalacao, public.tentativas_login, public.convites from anon, authenticated;
 
 -- ---------- Tempo real ----------
 do $$ declare t text; begin

@@ -33,3 +33,13 @@ Cole a Project URL e a Publishable key em [`src/js/config.js`](../src/js/config.
 - **Sem internet:** vendas e alterações ficam na fila do aparelho e são enviadas quando a conexão voltar.
 - **Plano gratuito do Supabase:** o projeto é pausado após 7 dias sem nenhum acesso (basta reativar no painel). Com uso diário isso não acontece; para garantia total, o plano Pro custa US$ 25/mês.
 - **Backup:** Gestão › Configurações › Exportar backup (o Supabase também guarda backups diários no plano Pro).
+
+## Atualizações do banco
+Quando uma nova versão pedir, cole de novo o `supabase/instalar.sql` inteiro no SQL Editor e clique em **Run**. É seguro: não apaga dados.
+
+## Dar acesso a um sócio ou funcionário (Gestão)
+1. Gestão › **Configurações › Equipe de gestão › Convidar gestor**.
+2. Envie o link e o código (vale 7 dias, uso único).
+3. A pessoa abre a Gestão › **Primeiro acesso**, cria e-mail e senha e informa o código.
+
+Papéis: **Dono** (você) administra a equipe; **Gestor** opera tudo, mas não pode remover o dono nem convidar/remover pessoas. Não adicione a pessoa ao Supabase nem como colaborador no GitHub: assim ela não tem acesso ao banco nem pode alterar o código.

@@ -3,9 +3,9 @@ import * as store from '../core/store.js';
 import * as D from '../core/domain.js';
 import { HARMONIZA } from '../core/catalogo.js';
 import { money, money0, moneyK, int, percent, date, dateShort, relDays, today, addDays, diffDays, esc, sum, plural, sortBy } from '../core/fmt.js';
-import { icon, router, delegate, modal, closeModal, confirmar, toast, kpi, badge, empty, thumb, stepper, stepHandler, fichaVinho, iniciais, qtdBadge, waLink, download, toCSV, asset, instalar, registerSW } from '../core/ui.js';
+import { icon, router, delegate, modal, closeModal, confirmar, toast, kpi, badge, empty, thumb, stepper, stepHandler, fichaVinho, iniciais, qtdBadge, waLink, download, toCSV, asset, instalar, registerSW, moneyInput, parseMoney } from '../core/ui.js';
 import { chart, mountCharts, resetCharts, hbars, heatmap } from '../core/charts.js';
-import { novoWizard, renderWizard, wizardHandlers, statusBadge } from '../core/fechamento-ui.js';
+import { novoWizard, renderWizard, wizardHandlers, statusBadge, ajustesHTML } from '../core/fechamento-ui.js';
 
 const app = document.getElementById('app');
 const S = () => store.get();
@@ -50,6 +50,7 @@ function vInicio() {
   const dias = diffDays(per.previsto, today());
   const hoje = D.resumoVendas(s, c.id, addDays(today(), -1));
   const topG = rv.porGarcom[0];
+  const transito = D.remessas(s).filter((r) => r.clienteId === c.id && r.status !== 'entregue');
   return shell('Início', `
     <div class="pagehead"><div><div class="label">${esc(c.cidade)}</div><h1 style="margin-top:4px">${esc(c.nome)}</h1></div><a class="btn hide-m" href="#/vender">${icon('plus')} Registrar venda</a></div>
     <div class="card dark">
@@ -63,6 +64,7 @@ function vInicio() {
       ${per.pendente ? `<div class="small mt" style="color:#E3C9A2">Seu fechamento de ${money(per.pendente.total)} foi enviado e está em conferência pela Mil Terras.</div>`
         : `<a class="btn ${dias <= 1 ? 'gold' : 'light'} block mt" href="#/fechamento/novo">${icon('receipt')} ${dias <= 1 ? 'Fazer o fechamento agora' : 'Antecipar fechamento'}</a>`}
     </div>
+    ${transito.map((r) => `<div class="ins info mt"><span class="ic">${icon('truck')}</span><span class="grow"><div class="t">Reposição ${{ a_separar: 'em preparação', separado: 'separada, sai em breve', em_rota: 'a caminho' }[r.status]}</div><div class="s">${r.itens.map((i) => `${i.qtd}× ${esc(D.produto(s, i.produtoId).nome)}`).join(', ')}</div></span>${badge(D.STATUS_ENTREGA[r.status].label, D.STATUS_ENTREGA[r.status].tone)}</div>`).join('')}
     ${acabando.length ? `<div class="ins atencao mt"><span class="ic">${icon('alert')}</span><span class="grow"><div class="t">${plural(acabando.length, 'rótulo acabando', 'rótulos acabando')}</div><div class="s">${acabando.map(([pid, q]) => `${esc(D.produto(s, pid).nome)} (${q})`).join(', ')}</div></span>
       <a class="btn sm gold" target="_blank" rel="noopener" href="${waLink(s.meta.whatsapp, `Olá, Mil Terras! Aqui é do ${c.nome}. Precisamos de reposição antecipada de: ${acabando.map(([pid]) => D.produto(s, pid).nome).join(', ')}.`)}">Pedir</a></div>` : ''}
     <div class="grid g2 mt">
@@ -189,7 +191,7 @@ function vNovoFechamento() {
   handlers = wizardHandlers(wz, rerender, store.commit, (f) => {
     wz = null;
     location.hash = `#/fechamento/${f.id}?enviado=1`;
-  }, 'cliente');
+  }, 'cliente', toast);
   return shell('Fechamento', `<div style="max-width:760px">${renderWizard(s, wz, { modo: 'cliente' })}</div>`, { back: true });
 }
 
@@ -205,7 +207,8 @@ function vFechamento({ id, query }) {
     <div class="card pad-0"><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Vinho</th><th class="r">Saldo</th><th class="r">Contado</th><th class="r">Vendido</th><th class="r">Valor</th></tr></thead>
       <tbody>${f.itens.map((i) => `<tr><td>${esc(D.produto(s, i.produtoId).nome)}</td><td class="r">${i.saldoAnterior}</td><td class="r">${i.contagem}</td><td class="r"><b>${i.vendido}</b></td><td class="r">${money(i.valor)}</td></tr>`).join('')}</tbody>
       <tfoot><tr><td colspan="3">Total · ${esc(f.formaPagamento)}</td><td class="r">${f.garrafas}</td><td class="r">${money(f.total)}</td></tr></tfoot></table></div></div>
-    ${repo.length ? `<div class="card mt"><div class="head"><h2>Reposição ${f.reposicaoEnviada ? 'enviada' : 'solicitada'}</h2></div><div class="list">${repo.map((r) => `<div class="li">${thumb(D.produto(s, r.produtoId), 'sm')}<div class="grow">${esc(D.produto(s, r.produtoId).nome)}</div><b>${r.qtd}</b></div>`).join('')}</div></div>` : ''}`, { back: true });
+    ${ajustesHTML(s, f)}
+    ${repo.length ? `<div class="card mt"><div class="head"><h2>Reposição ${f.reposicaoEnviada ? 'enviada' : 'solicitada'}</h2>${f.remessaId && D.remessas(s).find((r) => r.id === f.remessaId) ? badge(D.STATUS_ENTREGA[D.remessas(s).find((r) => r.id === f.remessaId).status].label, D.STATUS_ENTREGA[D.remessas(s).find((r) => r.id === f.remessaId).status].tone) : ''}</div><div class="list">${repo.map((r) => `<div class="li">${thumb(D.produto(s, r.produtoId), 'sm')}<div class="grow">${esc(D.produto(s, r.produtoId).nome)}</div><b>${r.qtd}</b></div>`).join('')}</div></div>` : ''}`, { back: true });
 }
 
 // ---------- Carta & harmonização ----------
@@ -247,7 +250,7 @@ function vAjustes() {
         <div class="list">${c.garcons.filter((g) => g.ativo).map((g) => `<div class="li"><div class="avatar">${iniciais(g.nome)}</div><div class="grow t">${esc(g.nome)}</div><button class="iconbtn" data-act="rmG" data-id="${g.id}" aria-label="Remover">${icon('trash')}</button></div>`).join('')}</div>
         <form class="row mt" data-onsubmit="addG"><input class="input" name="nome" placeholder="Nome do garçom" required><button class="btn">${icon('plus')}</button></form></div>
       <div class="card"><div class="head"><h2>Preços na sua carta</h2></div><div class="small muted mb">Usados para calcular sua receita e lucro. O custo é o preço de tabela Mil Terras.</div>
-        <form data-onsubmit="precos"><div class="list">${pids.map((p) => `<div class="li"><div class="grow"><div class="t">${esc(p.nome)}</div><div class="s">custo ${money(p.preco)}</div></div><input class="input num" style="width:110px" name="${p.id}" inputmode="decimal" value="${D.precoCarta(s, c, p.id).toFixed(2)}"></div>`).join('')}</div><button class="btn block mt">Salvar preços</button></form></div>
+        <form data-onsubmit="precos"><div class="list">${pids.map((p) => `<div class="li"><div class="grow"><div class="t">${esc(p.nome)}</div><div class="s">custo ${money(p.preco)}</div></div>${moneyInput(p.id, D.precoCarta(s, c, p.id), { width: 130 })}</div>`).join('')}</div><button class="btn block mt">Salvar preços</button></form></div>
     </div>
     <div class="card mt"><div class="head"><h2>Seu cadastro na Mil Terras</h2></div><div class="grid g3 small">
       <div><div class="label">Formas de pagamento</div>${c.formasPagamento.join(', ')}</div><div><div class="label">Prazo</div>${c.prazoDias} dias após conferência</div><div><div class="label">Ciclo</div>a cada ${c.cicloDias} dias</div></div>
@@ -311,7 +314,7 @@ const common = {
     download(`vendas-${c.codigo.toLowerCase()}-${today()}.csv`, toCSV(rows), 'text/csv'); },
   addG: (f) => { const nome = new FormData(f).get('nome').trim(); if (!nome) return; store.commit((st) => D.cliente(st, cid()).garcons.push({ id: 'g' + Date.now().toString(36), nome, ativo: true })); toast('Garçom adicionado'); },
   rmG: (el) => confirmar('Remover este garçom? As vendas antigas continuam nos relatórios.', { ok: 'Remover' }).then((y) => y && store.commit((st) => { D.garcom(D.cliente(st, cid()), el.dataset.id).ativo = false; })),
-  precos: (f) => { const fd = new FormData(f); store.commit((st) => { const c = D.cliente(st, cid()); for (const [k, v] of fd) { const n = +String(v).replace(',', '.'); if (n > 0) c.precosCarta[k] = n; } }); toast('Preços atualizados'); },
+  precos: (f) => { const fd = new FormData(f); store.commit((st) => { const c = D.cliente(st, cid()); for (const [k, v] of fd) { const n = parseMoney(v); if (n > 0) c.precosCarta[k] = n; } }); toast('Preços atualizados'); },
   pix: () => { const s = S(); const code = `PIX Mil Terras · WhatsApp ${s.meta.whatsapp}`; navigator.clipboard?.writeText(code); toast('Chave PIX copiada (configure a chave real em produção)'); },
   qty: () => {},
 };
