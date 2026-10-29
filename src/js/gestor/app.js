@@ -5,7 +5,7 @@ import { seed } from '../core/seed.js';
 import { money, money0, moneyK, int, percent, date, dateShort, relDays, today, addDays, diffDays, monthLabel, esc, sum, uid, plural, sortBy } from '../core/fmt.js';
 import { icon, router, delegate, modal, closeModal, confirmar, toast, kpi, badge, empty, thumb, stepper, stepHandler, insightCard, fichaVinho, iniciais, qtdBadge, waLink, download, toCSV, asset, instalar, registerSW, moneyInput, parseMoney, filtrarBusca, buscaInput } from '../core/ui.js';
 import { chart, mountCharts, resetCharts, legend, hbars } from '../core/charts.js';
-import { novoWizard, renderWizard, wizardHandlers, statusBadge, ajustesHTML } from '../core/fechamento-ui.js';
+import { novoWizard, renderWizard, wizardHandlers, statusBadge, ajustesHTML, acertosHTML } from '../core/fechamento-ui.js';
 
 const app = document.getElementById('app');
 const S = () => store.get();
@@ -80,59 +80,73 @@ function graficoParceiros(s) {
     return { c, q: sum(Object.values(m)), custo: sum(Object.entries(m), ([pid, q]) => q * cm[pid]), venda: sum(Object.entries(m), ([pid, q]) => q * D.produto(s, pid).preco) };
   }).sort((a, b) => b.q - a.q);
   if (!itens.length) return empty('Cadastre o primeiro parceiro.', 'store');
-  return hbars(itens.map((x) => ({ label: x.c.nome, value: x.q, vtxt: `${int(x.q)} gf · ${moneyK(x.custo)}`, sub: `${money0(x.custo)} a custo · ${money0(x.venda)} a preço de venda<br>Clique para ver e editar`, attrs: `data-act="consigDet" data-c="${x.c.id}" data-busca="${esc(x.c.nome + ' ' + x.c.cidade)}"` })), (v) => int(v) + ' gf', { color: 'var(--dourado)' });
+  return hbars(itens.map((x) => ({ label: x.c.nome, value: x.q, vtxt: `${int(x.q)} gf · ${moneyK(x.custo)}`, sub: `${money0(x.custo)} a custo · ${money0(x.venda)} a preço de venda<br>Clique para ver o detalhamento`, attrs: `data-act="consigDet" data-c="${x.c.id}" data-busca="${esc(x.c.nome + ' ' + x.c.cidade)}"` })), (v) => int(v) + ' gf', { color: 'var(--dourado)' });
 }
 
 // Detalhamento do consignado de um parceiro, com edição das quantidades
+// Detalhamento do consignado de um parceiro. Só permite REDUZIR (recolhimento ou correção, com justificativa);
+// aumentar é sempre por remessa, para ficar no histórico com protocolo.
 function modalConsig(cid) {
   const s = S();
   const c = D.cliente(s, cid);
   const saldo = D.saldoCliente(s, cid);
-  const est = D.estoqueCentral(s);
   const cm = D.custosMedios(s);
   let modo = 'mov';
   const pids = s.produtos.filter((p) => saldo[p.id] > 0).map((p) => p.id);
-  const outros = s.produtos.filter((p) => p.ativo && !pids.includes(p.id));
-  const linha = (p) => { const q = saldo[p.id] || 0; return `<div class="li">${thumb(p, 'sm')}<div class="grow"><div class="t">${esc(p.nome)}</div><div class="s">Hoje: <b>${q}</b> · ${money(q * cm[p.id])} a custo · central: ${est[p.id]}</div></div>${stepper('q:' + p.id, q, { max: q + Math.max(0, est[p.id]) })}</div>`; };
+  const abertos = D.lotesAbertos(s, cid);
   const transito = D.remessas(s).filter((r) => r.clienteId === cid && r.status !== 'entregue');
   const m = modal({ title: esc(c.nome), wide: true, body: `
     <div class="grid g3 mb"><div class="kpi"><div class="label">Garrafas</div><div class="v">${sum(Object.values(saldo))}</div></div>
       <div class="kpi"><div class="label">A custo</div><div class="v">${moneyK(sum(Object.entries(saldo), ([pid, q]) => q * cm[pid]))}</div></div>
       <div class="kpi"><div class="label">A preço de venda</div><div class="v">${moneyK(sum(Object.entries(saldo), ([pid, q]) => q * D.produto(s, pid).preco))}</div></div></div>
-    ${transito.length ? `<div class="ajuste-box mb">${icon('truck')} ${plural(sum(transito, (r) => r.garrafas), 'garrafa')} em remessa ainda não entregue (não entram no saldo até a entrega).</div>` : ''}
+    ${transito.length ? `<div class="ajuste-box mb">${icon('truck')} ${plural(sum(transito, (r) => r.garrafas), 'garrafa')} em remessa ainda não entregue (${transito.map((r) => r.protocolo).join(', ')}).</div>` : ''}
+    ${abertos.length ? `<div class="small mb"><b>Lotes em aberto:</b> ${abertos.map((l) => `${esc(l.protocolo)} ${badge(D.SITUACAO_LOTE[l.situacao].label + ' · ' + date(l.vence), D.SITUACAO_LOTE[l.situacao].tone)}`).join(' ')}</div>` : ''}
     <form id="fcons" class="col">
-      <div class="card pad-0"><div class="list" style="padding:0 14px">${pids.map((pid) => linha(D.produto(s, pid))).join('') || '<div class="empty">Nada em consignação.</div>'}</div></div>
-      <details><summary class="small" style="cursor:pointer;color:var(--bordo)">${icon('plus')} Incluir outro rótulo</summary><div class="card pad-0 mt-s"><div class="list" style="padding:0 14px">${outros.map(linha).join('')}</div></div></details>
-      <div class="field"><span>Como registrar as diferenças</span><div class="seg"><button type="button" class="on" data-act="modoCons" data-v="mov">Remessa / recolhimento</button><button type="button" data-act="modoCons" data-v="corr">Só corrigir o saldo</button></div>
-        <div class="tiny muted" id="modoTxt">Aumentos viram remessa (saem do estoque central); reduções viram recolhimento (voltam ao central).</div></div>
-      <div class="field" id="stEntrega"><span>Status da remessa (se houver aumento)</span><select class="input" name="status">${Object.entries(D.STATUS_ENTREGA).map(([k, v]) => `<option value="${k}" ${k === 'entregue' ? 'selected' : ''}>${v.label}</option>`).join('')}</select></div>
-      <label class="field"><span>Justificativa (obrigatória se alterar)</span><input class="input" name="motivo" maxlength="200" placeholder="Ex.: contagem na visita de 28/10"></label>
+      <div class="card pad-0"><div class="list" style="padding:0 14px">${pids.map((pid) => { const p = D.produto(s, pid); const q = saldo[pid]; return `<div class="li">${thumb(p, 'sm')}<div class="grow"><div class="t">${esc(p.nome)}</div><div class="s">Hoje: <b>${q}</b> · ${money(q * cm[pid])} a custo</div></div>${stepper('q:' + pid, q, { max: q })}</div>`; }).join('') || '<div class="empty">Nada em consignação.</div>'}</div></div>
+      <div class="row between wrap"><span class="tiny muted">Para aumentar quantidades ou incluir rótulos, faça uma remessa (gera protocolo e histórico).</span><button type="button" class="btn ghost sm" data-act="remDoConsig">${icon('truck')} Nova remessa</button></div>
+      <div class="field"><span>Se reduzir, como registrar</span><div class="seg"><button type="button" class="on" data-act="modoCons" data-v="mov">Recolhimento (volta ao estoque)</button><button type="button" data-act="modoCons" data-v="corr">Correção / perda no parceiro</button></div>
+        <div class="tiny muted" id="modoTxt">As garrafas voltam para o estoque central.</div></div>
+      <label class="field"><span>Justificativa (obrigatória se alterar)</span><input class="input" name="motivo" maxlength="200" placeholder="Ex.: recolhido na visita de 28/10"></label>
     </form>`,
     foot: `${verApp(cid, 'btn ghost')}<a class="btn ghost" href="#/parceiro/${cid}?tab=estoque" data-act="close">Abrir parceiro</a><button class="btn" data-act="ok">Salvar alterações</button>`,
     handlers: {
       step: stepHandler, qty: () => {},
       close: (el) => { closeModal(); if (el.getAttribute?.('href')) location.hash = el.getAttribute('href'); },
+      remDoConsig: () => { closeModal(); modalRemessa(cid); },
       modoCons: (el) => { modo = el.dataset.v; el.parentElement.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b === el));
-        m.querySelector('#modoTxt').textContent = modo === 'mov' ? 'Aumentos viram remessa (saem do estoque central); reduções viram recolhimento (voltam ao central).' : 'Corrige o saldo do parceiro sem mexer no estoque central (ex.: erro de lançamento, quebra no parceiro). Fica registrado com a justificativa.';
-        m.querySelector('#stEntrega').classList.toggle('hide', modo !== 'mov'); },
+        m.querySelector('#modoTxt').textContent = modo === 'mov' ? 'As garrafas voltam para o estoque central.' : 'Baixa no saldo do parceiro sem voltar ao estoque central (ex.: erro de lançamento, quebra no parceiro). Fica registrado com a justificativa.'; },
       ok: () => {
         const fd = new FormData(document.getElementById('fcons'));
-        const difs = s.produtos.map((p) => ({ p, d: (fd.get('q:' + p.id) === null ? saldo[p.id] || 0 : +fd.get('q:' + p.id) || 0) - (saldo[p.id] || 0) })).filter((x) => x.d !== 0);
+        const difs = pids.map((pid) => ({ p: D.produto(s, pid), d: Math.min(saldo[pid], Math.max(0, +fd.get('q:' + pid) || 0)) - saldo[pid] })).filter((x) => x.d !== 0);
         if (!difs.length) return closeModal();
         const motivo = String(fd.get('motivo') || '').trim();
         if (motivo.length < 3) { toast('Informe a justificativa da alteração'); return m.querySelector('[name=motivo]').focus(); }
-        if (modo === 'mov') { const falta = difs.find((x) => x.d > 0 && x.d > est[x.p.id]); if (falta) return toast(`${falta.p.nome}: só há ${Math.max(0, est[falta.p.id])} no estoque central`); }
         store.commit((st) => {
-          if (modo === 'corr') for (const { p, d } of difs) D.addMov(st, { tipo: 'ajuste_parceiro', produtoId: p.id, qtd: d, clienteId: cid, obs: motivo });
-          else {
-            const add = difs.filter((x) => x.d > 0).map((x) => ({ produtoId: x.p.id, qtd: x.d }));
-            if (add.length) D.criarRemessa(st, { clienteId: cid, itens: add, status: fd.get('status'), obs: motivo });
-            for (const { p, d } of difs.filter((x) => x.d < 0)) D.addMov(st, { tipo: 'devolucao', produtoId: p.id, qtd: -d, clienteId: cid, obs: motivo });
-          }
+          for (const { p, d } of difs) D.addMov(st, { tipo: modo === 'corr' ? 'ajuste_parceiro' : 'devolucao', produtoId: p.id, qtd: modo === 'corr' ? d : -d, clienteId: cid, obs: motivo });
         });
         closeModal(); toast('Consignação atualizada');
       },
     } });
+}
+
+// Onde está cada garrafa de um rótulo: depósito, cada parceiro e em trânsito
+function modalOndeEsta(pid) {
+  const s = S();
+  const p = D.produto(s, pid);
+  const est = Math.max(0, D.estoqueCentral(s)[pid] || 0);
+  const cons = D.consignado(s);
+  const cm = D.custosMedios(s)[pid];
+  const parc = s.clientes.map((c) => ({ c, q: cons[c.id]?.[pid] || 0 })).filter((x) => x.q > 0).sort((a, b) => b.q - a.q);
+  const trans = D.remessas(s).filter((r) => r.status !== 'entregue').flatMap((r) => r.itens.filter((i) => i.produtoId === pid).map((i) => ({ r, q: i.qtd })));
+  const total = est + sum(parc, (x) => x.q) + sum(trans, (x) => x.q);
+  modal({ title: esc(p.nome), body: `
+    <div class="row mb">${thumb(p)}<div><div class="kpi"><div class="label">Total da Mil Terras</div><div class="v">${plural(total, 'garrafa')}</div><div class="d">${money(total * cm)} a custo · ${money(total * p.preco)} a preço de tabela</div></div></div></div>
+    <div class="list">
+      <a class="li" href="#/produto/${pid}" data-act="close"><div class="avatar">${icon('box')}</div><div class="grow"><div class="t">Estoque central</div><div class="s">Depósito Mil Terras</div></div><b>${est}</b></a>
+      ${trans.map(({ r, q }) => `<a class="li" href="#/remessas" data-act="close"><div class="avatar">${icon('truck')}</div><div class="grow"><div class="t">Em trânsito · ${esc(r.protocolo)}</div><div class="s">${esc(D.cliente(s, r.clienteId)?.nome)} · ${D.STATUS_ENTREGA[r.status].label}</div></div><b>${q}</b></a>`).join('')}
+      ${parc.map(({ c, q }) => `<a class="li" href="#/parceiro/${c.id}?tab=estoque" data-act="close"><div class="avatar">${iniciais(c.nome)}</div><div class="grow"><div class="t">${esc(c.nome)}</div><div class="s">${esc(c.cidade || '')} · ${money(q * p.preco)}</div></div><b>${q}</b></a>`).join('') || '<div class="empty small">Nenhum parceiro com este rótulo.</div>'}
+    </div>`,
+    handlers: { close: (el) => { closeModal(); if (el.getAttribute?.('href')) location.hash = el.getAttribute('href'); } } });
 }
 
 // ---------- Painel ----------
@@ -187,12 +201,12 @@ function vPainel() {
         <div class="list">${agenda.slice(0, 6).map(({ c, per }) => `<a class="li" href="${per.pendente ? '#/fechamento/' + per.pendente.id : '#/parceiro/' + c.id}"><div class="avatar">${iniciais(c.nome)}</div><div class="grow"><div class="t ellipsis">${esc(c.nome)}</div><div class="s">${esc(c.cidade)}</div></div>
           ${per.pendente ? badge('Enviado', 'warn') : badge(relDays(per.previsto), per.previsto < today() ? 'crit' : per.previsto <= addDays(today(), 3) ? 'info' : '')}</a>`).join('')}</div></div>
     </div>
-    <div class="card mt"><div class="head"><h2>Garrafas por parceiro</h2><span class="muted small">clique para detalhar e editar</span></div>${graficoParceiros(s)}</div>
-    <div class="card mt"><div class="head"><h2>Onde está cada garrafa</h2><span class="muted small">estoque central × consignado</span></div>
+    <div class="card mt"><div class="head"><h2>Garrafas por parceiro</h2><span class="muted small">clique para detalhar</span></div>${graficoParceiros(s)}</div>
+    <div class="card mt"><div class="head"><h2>Onde está cada garrafa</h2><span class="muted small">clique num rótulo para ver onde está</span></div>
       ${legend([['Estoque central', 'var(--s1)'], ['Em consignação', 'var(--s2)']])}
       <div class="hbars">${sortBy(s.produtos.filter((p) => Math.max(0, est[p.id]) + sum(Object.values(cons), (m) => m[p.id] || 0) > 0), (p) => -(Math.max(0, est[p.id]) + sum(Object.values(cons), (m) => m[p.id] || 0))).map((p) => {
         const c1 = Math.max(0, est[p.id]), c2 = sum(Object.values(cons), (m) => m[p.id] || 0);
-        return `<div class="hb" data-tip="${esc(`<b>${esc(p.nome)}</b><br>Central: ${c1}<br>Consignado: ${c2}`)}"><div class="ellipsis">${esc(p.nome)}</div>
+        return `<div class="hb click" data-act="ondeEsta" data-p="${p.id}" data-busca="${esc(p.nome)}" data-tip="${esc(`<b>${esc(p.nome)}</b><br>Central: ${c1}<br>Consignado: ${c2}<br>Clique para ver onde está`)}"><div class="ellipsis">${esc(p.nome)}</div>
           <div class="bar-t" style="display:flex;gap:2px;background:none"><i style="width:${(100 * c1) / maxQ}%;background:var(--s1);border-radius:0"></i><i style="width:${(100 * c2) / maxQ}%;background:var(--s2)"></i></div><div class="v">${c1 + c2}</div></div>`;
       }).join('')}</div></div>
   `);
@@ -329,7 +343,7 @@ function vConsignacao({ query }) {
   const cus = (c) => sum(Object.entries(cons[c.id] || {}), ([pid, q]) => q * cm[pid]);
   return shell('Consignação', `
     ${pageHead('Estoque em terceiros', `${plural(sum(cls, tot), 'garrafa')} em consignação · <b>${money0(sum(cls, cus))}</b> a custo · ${money0(sum(cls, val))} a preço de tabela`, `${busca('Buscar parceiro…')}<button class="btn ghost" data-act="devolucao">${icon('swap')} Recolher</button><button class="btn" data-act="remessa">${icon('truck')} Nova remessa</button>`)}
-    <div class="card"><div class="head"><h2>Garrafas por parceiro</h2><span class="muted small">clique para detalhar e editar</span></div>${graficoParceiros(s)}</div>
+    <div class="card"><div class="head"><h2>Garrafas por parceiro</h2><span class="muted small">clique para detalhar</span></div>${graficoParceiros(s)}</div>
     <h2 class="mt">Mapa da consignação</h2>
     <div class="card pad-0 mt-s"><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Parceiro</th><th class="r">Garrafas</th><th class="r">A custo</th><th class="r">A venda</th>${prods.map((p) => `<th class="r" title="${esc(p.nome)}">${esc(p.nome.split(' ')[0])}</th>`).join('')}</tr></thead>
       <tbody>${cls.map((c) => `<tr class="click" data-act="consigDet" data-c="${c.id}" data-busca="${esc(c.nome + ' ' + c.cidade)}"><td style="white-space:nowrap">${esc(c.nome)}</td><td class="r"><b>${tot(c)}</b></td><td class="r" style="white-space:nowrap">${money0(cus(c))}</td><td class="r" style="white-space:nowrap">${money0(val(c))}</td>${prods.map((p) => { const q = cons[c.id]?.[p.id] || 0; return `<td class="r ${q ? '' : 'muted'}">${q || '·'}</td>`; }).join('')}</tr>`).join('')}</tbody>
@@ -394,6 +408,7 @@ function vRemessas({ query }) {
     const st = D.STATUS_ENTREGA[r.status];
     const dias = diffDays(today(), r.data);
     return `<div class="card kcard" data-busca="${esc((c?.nome || '') + ' ' + r.itens.map((i) => D.produto(s, i.produtoId)?.nome).join(' '))}">
+      <div class="tiny" style="font-weight:600;letter-spacing:.04em;color:var(--dourado)">${esc(r.protocolo || '')}</div>
       <div class="row between"><b class="ellipsis">${esc(c?.nome || '—')}</b>${r.status !== 'entregue' && dias >= 2 ? badge(`${dias}d`, 'warn') : ''}</div>
       <div class="tiny muted">${date(r.data)} · ${r.ref?.startsWith('pd') ? 'pedido do parceiro' : r.ref ? 'reposição de fechamento' : esc(r.obs || 'remessa manual')}</div>
       <div class="small mt-s">${r.itens.map((i) => `${i.qtd}× ${esc(D.produto(s, i.produtoId).nome)}`).join('<br>')}</div>
@@ -474,9 +489,12 @@ function vParceiro({ id, query }) {
   }
   if (tab === 'estoque') {
     body = `<div class="row between wrap mb"><div class="small muted">Saldo oficial (último fechamento + remessas entregues) e estimativa atual (descontando vendas lançadas no app). Valor a custo.</div>
-      <div class="row wrap"><a class="btn ghost sm" href="#/imprimir/romaneio/${c.id}">${icon('print')} Romaneio</a><button class="btn ghost sm" data-act="consigDet" data-c="${c.id}">${icon('edit')} Editar quantidades</button><button class="btn ghost sm" data-act="devolucao" data-c="${c.id}">Recolher</button><button class="btn sm" data-act="remessa" data-c="${c.id}">${icon('truck')} Remessa</button></div></div>
+      <div class="row wrap"><a class="btn ghost sm" href="#/imprimir/romaneio/${c.id}">${icon('print')} Romaneio</a><button class="btn ghost sm" data-act="consigDet" data-c="${c.id}">${icon('edit')} Baixar / corrigir</button><button class="btn ghost sm" data-act="devolucao" data-c="${c.id}">Recolher</button><button class="btn sm" data-act="remessa" data-c="${c.id}">${icon('truck')} Remessa</button></div></div>
       <div class="card pad-0"><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Rótulo</th><th class="r">Saldo oficial</th><th class="r">Estimado hoje</th><th class="r">Venda/quinzena</th><th class="r hide-m">Valor a custo</th></tr></thead>
       <tbody>${Object.entries(saldo).filter(([, q]) => q > 0).map(([pid, q]) => { const p = D.produto(s, pid); const r = D.taxaDiaria(s, id, pid) * c.cicloDias; return `<tr><td><div class="row">${thumb(p, 'sm')}${esc(p.nome)}</div></td><td class="r">${q}</td><td class="r">${qtdBadge(estm[pid] ?? 0)}</td><td class="r">${r.toFixed(1).replace('.', ',')}</td><td class="r hide-m">${money(q * cmP[pid])}</td></tr>`; }).join('')}</tbody></table></div></div>
+      <h2 class="mt">Lotes (remessas entregues)</h2>
+      <div class="card pad-0 mt-s"><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Protocolo</th><th>Entregue</th><th>Vence</th><th class="r">Enviado</th><th class="r">Restam</th><th class="r">A acertar</th><th>Situação</th></tr></thead>
+      <tbody>${D.lotes(s, id).reverse().slice(0, 30).map((l) => `<tr><td><a href="#/imprimir/romaneio/${id}?r=${l.id}">${esc(l.protocolo)}</a></td><td>${date(l.entregueEm)}</td><td>${l.aberto ? date(l.vence) : '—'}</td><td class="r">${l.enviado}</td><td class="r">${l.restante}</td><td class="r">${l.pendente ? `${l.pendente} · ${money(l.valorPendente)}` : '—'}</td><td>${badge(D.SITUACAO_LOTE[l.situacao].label, D.SITUACAO_LOTE[l.situacao].tone)}</td></tr>`).join('')}</tbody></table></div></div>
       <h2 class="mt">Movimentações do parceiro</h2>
       <div class="card pad-0 mt-s"><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Data</th><th>Tipo</th><th>Rótulo</th><th class="r">Qtd.</th><th>Justificativa / obs.</th></tr></thead>
       <tbody>${sortBy(s.movs.filter((m) => m.clienteId === id), (m) => m.data + m.id, true).slice(0, 40).map((m) => { const f = D.TIPOS_MOV[m.tipo].cliente; const pend = m.tipo === 'remessa' && m.entrega && m.entrega !== 'entregue'; return `<tr><td>${dateShort(m.data)}</td><td>${badge(D.TIPOS_MOV[m.tipo].label, m.tipo === 'ajuste_parceiro' ? 'warn' : m.tipo === 'remessa' ? 'info' : '')} ${pend ? badge(D.STATUS_ENTREGA[m.entrega].label, D.STATUS_ENTREGA[m.entrega].tone) : ''}</td><td>${esc(D.produto(s, m.produtoId).nome)}</td><td class="r"><b>${f * m.qtd > 0 ? '+' : ''}${f * m.qtd}</b></td><td class="small muted">${esc(m.obs || '')}</td></tr>`; }).join('')}</tbody></table></div></div>`;
@@ -549,6 +567,10 @@ function vFechamentos({ query }) {
   const n = (st) => s.fechamentos.filter((f) => f.status === st).length;
   return shell('Fechamentos', `
     ${pageHead('Fechamentos', 'Acertos periódicos com os parceiros', `${busca('Buscar parceiro…')}<button class="btn" data-act="novoFech">${icon('plus')} Fazer fechamento</button>`)}
+    ${(() => { const ag = D.agendaFechamentos(s); return ag.length ? `<div class="card mb"><div class="head"><h2>Agenda dos próximos fechamentos</h2><span class="small muted">período do parceiro ou lote que vence primeiro</span></div>
+      <div class="list">${ag.map((x) => `<a class="li" href="${x.per.pendente ? '#/fechamento/' + x.per.pendente.id : '#/parceiro/' + x.c.id + '?tab=estoque'}" data-busca="${esc(x.c.nome)}"><div class="avatar">${iniciais(x.c.nome)}</div>
+        <div class="grow"><div class="t">${esc(x.c.nome)}</div><div class="s">${x.per.pendente ? 'Fechamento enviado — aguardando sua conferência' : `${plural(x.lotes.length, 'lote aberto', 'lotes abertos')}${x.vencidos.length ? ` · <b style="color:var(--crit)">${x.vencidos.length} vencido(s)</b>` : ''}${x.vencendo.length ? ` · ${x.vencendo.length} vencendo` : ''} · estimado ${money0(x.estimado)}`}</div></div>
+        ${x.per.pendente ? badge('Enviado', 'warn') : badge(x.dias < 0 ? `atrasado ${-x.dias}d` : x.dias === 0 ? 'hoje' : `${date(x.data)} · ${x.dias}d`, x.dias < 0 ? 'crit' : x.dias <= 3 ? 'warn' : '')}</a>`).join('')}</div></div>` : ''; })()}
     <div class="seg mb">${[['todos', 'Todos'], ['enviado', `Para conferir (${n('enviado')})`], ['aprovado', `A receber (${n('aprovado')})`], ['pago', 'Pagos']].map(([k, l]) => `<button class="${filtro === k ? 'on' : ''}" data-act="goto" data-h="#/fechamentos?f=${k}">${l}</button>`).join('')}</div>
     ${tabelaFechamentos(s, fs.slice(0, 80), true)}`);
 }
@@ -563,16 +585,17 @@ function vFechamento({ id }) {
   const repo = f.status === 'enviado' ? f.reposicao : f.reposicaoEnviada || [];
   const txt = `*Mil Terras · Fechamento*\n${c.nome}\nPeríodo: ${date(f.inicio)} a ${date(f.fim)}\n\n${f.itens.filter((i) => i.vendido).map((i) => `${i.vendido}× ${D.produto(s, i.produtoId).nome} — ${money(i.valor)}`).join('\n')}\n\n*Total: ${money(f.total)}*\nPagamento: ${f.formaPagamento}${f.vencimento ? ` até ${date(f.vencimento)}` : ''}\n\nObrigado pela parceria! 🍷`;
   return shell('Fechamento', `
-    <div class="pagehead"><div><div class="label">${esc(c.nome)}</div><h1 style="margin-top:4px">Fechamento ${date(f.inicio)} – ${date(f.fim)}</h1>
+    <div class="pagehead"><div><div class="label">${esc(c.nome)}</div><h1 style="margin-top:4px">${f.numero ? esc(f.numero) + ' · ' : ''}Fechamento ${date(f.inicio)} – ${date(f.fim)}</h1>
       <div class="sub row gap-s wrap">${statusBadge(f)} <span>Feito por ${f.criadoPor === 'cliente' ? 'parceiro, pelo app' : 'Mil Terras'}</span>${f.aprovadoEm ? `<span>· conferido ${date(f.aprovadoEm)}</span>` : ''}${f.pagoEm ? `<span>· pago ${date(f.pagoEm)}</span>` : ''}</div></div>
       <div class="row wrap"><a class="btn ghost" href="#/imprimir/fechamento/${f.id}">${icon('print')} Relatório</a><a class="btn ghost" target="_blank" rel="noopener" href="${waLink(c.telefone, txt)}">${icon('whatsapp')} Enviar</a>
       ${f.status === 'enviado' ? `<button class="btn ok" data-act="aprovar" data-id="${f.id}">${icon('check')} Conferir e aprovar</button>` : ''}
       ${f.status === 'aprovado' ? `<button class="btn ok" data-act="pagar" data-id="${f.id}">${icon('money')} Registrar pagamento</button>` : ''}</div></div>
-    <div class="grid g4">${kpi('Total do período', money(f.total), `${f.garrafas} garrafas`)}
+    <div class="grid g4">${kpi('A pagar', money(f.total), `${f.garrafas} garrafas acertadas${f.naoAcertado ? ` · ${f.naoAcertado} para depois` : ''}`)}
       <div class="card kpi"><div class="label">Forma de pagamento</div>${f.status === 'pago' ? `<div class="v">${esc(f.formaPagamento || '—')}</div>` : `<select class="input" data-onchange="formaFech" data-id="${f.id}" style="font-weight:600">${[...new Set([...c.formasPagamento, ...D.FORMAS_PAGAMENTO])].map((x) => `<option ${x === f.formaPagamento ? 'selected' : ''}>${x}${c.formasPagamento.includes(x) ? '' : ' (fora do cadastro)'}</option>`).join('')}</select>`}<div class="d">${f.vencimento ? `vence ${date(f.vencimento)}` : `prazo ${c.prazoDias} dias após aprovação`}</div></div>
       ${kpi('Ajustes de contagem', f.ajustes ? `<span style="color:var(--warn)">${f.ajustes}</span>` : '0', f.ajustes ? 'com justificativa do parceiro' : `${f.garrafas ? Math.round((100 * reg) / f.garrafas) : 100}% das vendas lançadas no app`)}
       ${kpi('Reposição', plural(sum(repo, (r) => r.qtd), 'garrafa'), f.status === 'enviado' ? 'solicitada' : f.remessaId ? `<a href="#/remessas">${(D.remessas(s).find((r) => r.id === f.remessaId) || {}).status ? D.STATUS_ENTREGA[D.remessas(s).find((r) => r.id === f.remessaId).status].label : 'enviada'}</a>` : 'enviada')}</div>
     ${ajustesHTML(s, f)}
+    ${acertosHTML(s, f)}
     ${f.obs ? `<div class="card mt" style="border-left:3px solid var(--dourado)"><div class="label">Observação do parceiro</div><div class="mt-s">${esc(f.obs)}</div></div>` : ''}
     <div class="grid g2 mt">
       <div class="card pad-0"><div style="padding:16px 16px 0"><h2>Vendas apuradas</h2></div><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Rótulo</th><th class="r">Saldo</th><th class="r">Esperado</th><th class="r">Contado</th><th class="r">Vendido</th><th class="r">Valor</th></tr></thead>
@@ -592,7 +615,7 @@ function vNovoFechamento({ cid }) {
     toast(aprovado ? `Fechamento aprovado: ${money(f.total)}` : 'Fechamento salvo para conferência');
     if (f.avisos?.length) setTimeout(() => toast(f.avisos[0]), 2900);
     location.hash = `#/fechamento/${f.id}`;
-  }, 'gestor', toast);
+  }, 'gestor', toast, S);
   const per = D.periodoAtual(s, cid);
   if (per.pendente) return shell('Fechamento', `${pageHead(esc(c.nome))}<div class="card">${empty(`Já existe um fechamento enviado por este parceiro aguardando conferência.<br><a href="#/fechamento/${per.pendente.id}">Abrir fechamento</a>`, 'inbox')}</div>`, { back: true });
   return shell('Fechamento', `<div class="label">${esc(c.nome)}</div><div style="max-width:760px">${renderWizard(s, wz, { modo: 'gestor' })}</div>`, { back: true });
@@ -818,11 +841,13 @@ function vImprimirFechamento({ id }) {
   const f = s.fechamentos.find((x) => x.id === id);
   const c = D.cliente(s, f.clienteId);
   const repo = f.reposicaoEnviada || f.reposicao || [];
-  return shell('Relatório', `${docHead('Relatório de fechamento', `Período ${date(f.inicio)} a ${date(f.fim)}`)}
+  return shell('Relatório', `${docHead('Relatório de fechamento', `${f.numero ? f.numero + ' · ' : ''}Período ${date(f.inicio)} a ${date(f.fim)}`)}
     <div class="grid g2 small" style="gap:6px 30px"><div><span class="label">Parceiro</span><br><b>${esc(c.nome)}</b><br>${esc(c.cidade)} · ${esc(c.contato)}</div><div><span class="label">Pagamento</span><br><b>${esc(f.formaPagamento)}</b>${f.vencimento ? `<br>Vencimento ${date(f.vencimento)}` : ''}<br>Status: ${D.STATUS_FECH[f.status].label}</div></div>
     <table class="tbl mt"><thead><tr><th>Rótulo</th><th class="r">Saldo anterior</th><th class="r">Contagem</th><th class="r">Vendido</th><th class="r">Preço un.</th><th class="r">Valor</th></tr></thead>
       <tbody>${f.itens.map((i) => `<tr><td>${esc(D.produto(s, i.produtoId).nome)}</td><td class="r">${i.saldoAnterior}</td><td class="r">${i.contagem}</td><td class="r">${i.vendido}</td><td class="r">${money(i.preco)}</td><td class="r">${money(i.valor)}</td></tr>`).join('')}</tbody>
-      <tfoot><tr><td colspan="3">Total a pagar</td><td class="r">${f.garrafas}</td><td></td><td class="r" style="color:var(--bordo);font-size:16px">${money(f.total)}</td></tr></tfoot></table>
+      <tfoot><tr><td colspan="3">Vendido no período</td><td class="r">${f.vendidas ?? f.garrafas}</td><td></td><td class="r">${money(sum(f.itens, (i) => i.valor))}</td></tr></tfoot></table>
+    ${acertosHTML(s, f, { doc: true })}
+    <div class="row between mt" style="font-size:16px"><b>Total a pagar</b><b style="color:var(--bordo)">${money(f.total)}</b></div>
     ${repo.length ? `<h3 class="mt">Reposição</h3><table class="tbl mt-s"><thead><tr><th>Rótulo</th><th class="r">Quantidade</th></tr></thead><tbody>${repo.map((r) => `<tr><td>${esc(D.produto(s, r.produtoId).nome)}</td><td class="r">${r.qtd}</td></tr>`).join('')}</tbody></table>` : ''}
     ${f.obs ? `<p class="small"><b>Observações:</b> ${esc(f.obs)}</p>` : ''}
     <div class="sign"><div>Mil Terras</div><div>${esc(c.nome)}</div></div>${docFoot()}`, { back: true });
@@ -846,14 +871,14 @@ function vImprimirRomaneio({ cid, query }) {
   const tabela = (its, t) => `<table class="tbl"><thead><tr><th>Rótulo</th><th class="r">Qtd.</th><th class="r">Preço un.</th><th class="r">Valor</th></tr></thead>
     <tbody>${sortBy(its, ([pid]) => D.produto(s, pid).nome).map(([pid, q]) => { const p = D.produto(s, pid); return `<tr><td>${esc(p.nome)}</td><td class="r">${q}</td><td class="r">${money(p.preco)}</td><td class="r">${money(q * p.preco)}</td></tr>`; }).join('')}</tbody>
     <tfoot><tr><td>Total</td><td class="r">${t.q}</td><td></td><td class="r">${money(t.v)}</td></tr></tfoot></table>`;
-  return shell('Romaneio', `${docHead('Romaneio de consignação', esc(c.nome))}
+  return shell('Romaneio', `${docHead('Romaneio de consignação', `${remessa[0]?.protocolo ? 'Protocolo ' + remessa[0].protocolo + ' · ' : ''}${esc(c.nome)}`)}
     <div class="resumo small">
       <div>Esta remessa${data ? ` · ${date(data)}` : ''}<b>${plural(tR.q, 'garrafa')} · ${money(tR.v)}</b></div>
       <div>Saldo em consignação<b>${plural(tS.q, 'garrafa')} · ${money(tS.v)}</b></div>
       <div>Parceiro<b style="font-size:14px">${esc(c.nome)}</b>${esc(c.cidade || '')}${c.contato ? ' · ' + esc(c.contato) : ''}</div>
     </div>
     <p class="small">Os vinhos abaixo permanecem de propriedade da <b>Mil Terras</b> e ficam em consignação no estabelecimento. O parceiro paga somente o que vender, no acerto a cada ${c.cicloDias} dias. Valores pelo preço de tabela.</p>
-    ${itensRem.length ? `<div class="bloco"><h3><span>1. Itens desta remessa</span><span>${data ? date(data) : ''}${st ? ' · ' + D.STATUS_ENTREGA[st].label : ''}</span></h3>${tabela(itensRem, tR)}</div>` : ''}
+    ${itensRem.length ? `<div class="bloco"><h3><span>1. Itens desta remessa${remessa[0]?.protocolo ? ' · ' + remessa[0].protocolo : ''}</span><span>${data ? date(data) : ''}${st ? ' · ' + D.STATUS_ENTREGA[st].label : ''}</span></h3>${tabela(itensRem, tR)}</div>` : ''}
     <div class="bloco"><h3><span>${itensRem.length ? '2. ' : ''}Saldo total em consignação após a entrega</span><span>${plural(tS.q + (st ? tR.q : 0), 'garrafa')}</span></h3>${tabela(st ? agrupar([...itensSaldo, ...itensRem]) : itensSaldo, st ? tot(agrupar([...itensSaldo, ...itensRem])) : tS)}</div>
     <div class="sign"><div>Mil Terras</div><div>${esc(c.nome)} — recebido em ___/___/______</div></div>${docFoot()}`, { back: true });
 }
@@ -1047,6 +1072,7 @@ const common = {
   removerGestor: (el) => confirmar(`Remover o acesso de <b>${el.dataset.e}</b> à Gestão?`, { ok: 'Remover' }).then(async (y) => { if (!y) return; try { await store.rpc('remover_gestor', { p_user: el.dataset.u }); toast('Acesso removido'); carregarEquipe(); } catch (e) { toast(e.message); } }),
   cancelarConvite: (el) => store.rpc('cancelar_convite', { p_codigo: el.dataset.c }).then(() => { toast('Convite cancelado'); carregarEquipe(); }).catch((e) => toast(e.message)),
   consigDet: (el) => modalConsig(el.dataset.c),
+  ondeEsta: (el) => modalOndeEsta(el.dataset.p),
   abrirApp: (el) => window.open(urlApp(el.dataset.c), '_blank', 'noopener'),
   novoCodigo: (el) => {
     const inp = el.parentElement.querySelector('input');
@@ -1102,6 +1128,9 @@ delegate(app, new Proxy({}, { get: (_, k) => handlers[k] || common[k] }));
 async function aposEntrar() {
   const s = S();
   if (!s) return;
+  // remessas antigas ganham protocolo e fechamentos ganham número (rastreabilidade)
+  const copia = JSON.parse(JSON.stringify({ movs: s.movs, clientes: s.clientes, fechamentos: s.fechamentos }));
+  if (D.migrarProtocolos(copia)) store.commit((st) => D.migrarProtocolos(st));
   const novas = {};
   for (const c of s.clientes.filter((x) => x.ativo)) {
     const r = D.recomendacoes(s, c.id, 3).map((x) => x.produtoId);

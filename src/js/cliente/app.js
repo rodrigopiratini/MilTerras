@@ -5,7 +5,7 @@ import { HARMONIZA } from '../core/catalogo.js';
 import { money, money0, moneyK, int, percent, date, dateShort, relDays, today, addDays, diffDays, esc, sum, plural, sortBy } from '../core/fmt.js';
 import { icon, router, delegate, modal, closeModal, confirmar, toast, kpi, badge, empty, thumb, stepper, stepHandler, fichaVinho, iniciais, qtdBadge, waLink, download, toCSV, asset, instalar, registerSW, moneyInput, parseMoney } from '../core/ui.js';
 import { chart, mountCharts, resetCharts, hbars, heatmap } from '../core/charts.js';
-import { novoWizard, renderWizard, wizardHandlers, statusBadge, ajustesHTML } from '../core/fechamento-ui.js';
+import { novoWizard, renderWizard, wizardHandlers, statusBadge, ajustesHTML, acertosHTML } from '../core/fechamento-ui.js';
 
 const app = document.getElementById('app');
 const S = () => store.get();
@@ -54,6 +54,7 @@ function vInicio() {
   const hoje = { garrafas: sum(rv.vendas.filter((v) => v.data === today()), (v) => v.qtd) }; // só o que está no período atual
   const topG = rv.porGarcom[0];
   const transito = D.remessas(s).filter((r) => r.clienteId === c.id && r.status !== 'entregue');
+  const lotesAlerta = D.lotesAbertos(s, c.id).filter((l) => l.situacao === 'vencido' || l.situacao === 'vencendo');
   return shell('Início', `
     <div class="pagehead"><div><div class="label">${esc(c.cidade)}</div><h1 style="margin-top:4px">${esc(c.nome)}</h1></div><a class="btn hide-m" href="#/vender">${icon('plus')} Registrar venda</a></div>
     <div class="card dark">
@@ -67,7 +68,9 @@ function vInicio() {
       ${per.pendente ? `<div class="small mt" style="color:#E3C9A2">Seu fechamento de ${money(per.pendente.total)} foi enviado e está em conferência pela Mil Terras.</div>`
         : `<a class="btn ${dias <= 1 ? 'gold' : 'light'} block mt" href="#/fechamento/novo">${icon('receipt')} ${dias <= 1 ? 'Fazer o fechamento agora' : 'Antecipar fechamento'}</a>`}
     </div>
-    ${transito.map((r) => `<div class="ins info mt"><span class="ic">${icon('truck')}</span><span class="grow"><div class="t">Reposição ${{ a_separar: 'em preparação', separado: 'separada, sai em breve', em_rota: 'a caminho' }[r.status]}</div><div class="s">${r.itens.map((i) => `${i.qtd}× ${esc(D.produto(s, i.produtoId).nome)}`).join(', ')}</div></span>${badge(D.STATUS_ENTREGA[r.status].label, D.STATUS_ENTREGA[r.status].tone)}</div>`).join('')}
+    ${lotesAlerta.length ? `<a class="ins ${lotesAlerta.some((l) => l.situacao === 'vencido') ? 'critico' : 'atencao'} mt" href="#/fechamento"><span class="ic">${icon('calendar')}</span><span class="grow"><div class="t">${lotesAlerta.some((l) => l.situacao === 'vencido') ? 'Lotes com acerto vencido' : 'Lotes vencendo nos próximos dias'}</div>
+      <div class="s">${lotesAlerta.map((l) => `${esc(l.protocolo)} ${l.dias < 0 ? `venceu há ${-l.dias}d` : l.dias === 0 ? 'vence hoje' : `vence em ${l.dias}d`}`).join(' · ')}. Faça o fechamento para acertar.</div></span>${icon('arrowR')}</a>` : ''}
+    ${transito.map((r) => `<div class="ins info mt"><span class="ic">${icon('truck')}</span><span class="grow"><div class="t">Reposição ${{ a_separar: 'em preparação', separado: 'separada, sai em breve', em_rota: 'a caminho' }[r.status]} · ${esc(r.protocolo || '')}</div><div class="s">${r.itens.map((i) => `${i.qtd}× ${esc(D.produto(s, i.produtoId).nome)}`).join(', ')}</div></span>${badge(D.STATUS_ENTREGA[r.status].label, D.STATUS_ENTREGA[r.status].tone)}</div>`).join('')}
     ${Object.keys(c.filaPedido || {}).length ? `<div class="ins oportunidade mt"><span class="ic">${icon('star')}</span><span class="grow"><div class="t">Fila de pedido: ${Object.entries(c.filaPedido).map(([pid, q]) => `${q}× ${esc(D.produto(s, pid)?.nome)}`).join(', ')}</div><div class="s">Vai sugerida no próximo fechamento. Se preferir, antecipe o pedido agora.</div></span><a class="btn sm gold" href="#/pedido?fila=1">Antecipar pedido</a></div>` : ''}
     ${acabando.length ? `<div class="ins atencao mt"><span class="ic">${icon('alert')}</span><span class="grow"><div class="t">${plural(acabando.length, 'rótulo acabando', 'rótulos acabando')}</div><div class="s">${acabando.map(([pid, q]) => `${esc(D.produto(s, pid).nome)} (${q})`).join(', ')}</div></span>
       <a class="btn sm gold" href="#/pedido?p=${acabando.map(([pid]) => pid).join(',')}">Pedir</a></div>` : ''}
@@ -206,6 +209,8 @@ function vFechamentos() {
       : `<div class="card dark"><div class="label">Próximo fechamento · ${date(per.previsto)} (${relDays(per.previsto)})</div>
         <div class="row between wrap mt"><div><div class="v" style="font-family:var(--font-t);font-size:26px">${money(rv.custo)}</div><div class="small" style="color:#E3C9A2">estimado até agora · ${plural(rv.garrafas, 'garrafa lançada', 'garrafas lançadas')}</div></div>
         <a class="btn gold lg" href="#/fechamento/novo">${icon('receipt')} Fazer fechamento</a></div></div>`}
+    ${(() => { const ls = D.lotesAbertos(s, c.id); return ls.length ? `<h2 class="mt">Meus lotes em aberto</h2><div class="small muted mt-s">Cada remessa recebida é um lote. Ela vence ${c.cicloDias} dias após a entrega (ou após o último acerto).</div>
+      <div class="card pad-0 mt-s"><div class="list" style="padding:0 16px">${ls.map((l) => `<div class="li"><div class="grow"><div class="t">${esc(l.protocolo)}</div><div class="s">Entregue ${date(l.entregueEm)} · ${plural(l.enviado, 'garrafa')} · restam ${l.restante}${l.pendente ? ` · ${l.pendente} vendida(s) a acertar` : ''}</div></div>${badge(l.dias < 0 ? `venceu ${date(l.vence)}` : `vence ${date(l.vence)}`, D.SITUACAO_LOTE[l.situacao].tone)}</div>`).join('')}</div></div>` : ''; })()}
     <h2 class="mt">Histórico</h2>
     <div class="card pad-0 mt-s"><div class="list" style="padding:0 16px">${fs.filter((f) => f.status !== 'enviado').map((f) => `<a class="li" href="#/fechamento/${f.id}"><div class="grow"><div class="t">${date(f.inicio)} – ${date(f.fim)}</div><div class="s">${plural(f.garrafas, 'garrafa')} · ${esc(f.formaPagamento)}</div></div><div class="right"><div class="num" style="font-weight:600">${money(f.total)}</div>${statusBadge(f, true)}</div></a>`).join('') || empty('Nenhum fechamento ainda')}</div></div>`);
 }
@@ -218,7 +223,7 @@ function vNovoFechamento() {
   handlers = wizardHandlers(wz, rerender, store.commit, (f) => {
     wz = null;
     location.hash = `#/fechamento/${f.id}?enviado=1`;
-  }, 'cliente', toast);
+  }, 'cliente', toast, S);
   return shell('Fechamento', `<div style="max-width:760px">${renderWizard(s, wz, { modo: 'cliente' })}</div>`, { back: true });
 }
 
@@ -229,12 +234,13 @@ function vFechamento({ id, query }) {
   const repo = f.reposicaoEnviada || f.reposicao || [];
   return shell('Fechamento', `
     ${query.enviado ? `<div class="card mb" style="background:var(--ok-bg);border-color:transparent"><div class="row">${icon('check')}<div><b>Fechamento enviado!</b><div class="small">A Mil Terras recebeu e vai conferir. A reposição sai logo após a aprovação.</div></div></div></div>` : ''}
-    <div class="pagehead"><div><div class="label">${date(f.inicio)} – ${date(f.fim)}</div><h1 style="margin-top:4px">${money(f.total)}</h1><div class="sub row gap-s">${statusBadge(f, true)} ${f.vencimento && f.status === 'aprovado' ? `<span>vence ${date(f.vencimento)}</span>` : ''}</div></div>
+    <div class="pagehead"><div><div class="label">${f.numero ? esc(f.numero) + ' · ' : ''}${date(f.inicio)} – ${date(f.fim)}</div><h1 style="margin-top:4px">${money(f.total)}</h1><div class="sub row gap-s">${statusBadge(f, true)} ${f.vencimento && f.status === 'aprovado' ? `<span>vence ${date(f.vencimento)}</span>` : ''}</div></div>
       <div class="row">${f.status === 'aprovado' && f.formaPagamento === 'PIX' ? `<button class="btn" data-act="pix">PIX copia e cola</button>` : ''}<button class="btn ghost" data-act="print">${icon('print')} Imprimir</button></div></div>
     <div class="card pad-0"><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Vinho</th><th class="r">Saldo</th><th class="r">Contado</th><th class="r">Vendido</th><th class="r">Valor</th></tr></thead>
       <tbody>${f.itens.map((i) => `<tr><td>${esc(D.produto(s, i.produtoId).nome)}</td><td class="r">${i.saldoAnterior}</td><td class="r">${i.contagem}</td><td class="r"><b>${i.vendido}</b></td><td class="r">${money(i.valor)}</td></tr>`).join('')}</tbody>
       <tfoot><tr><td colspan="3">Total · ${esc(f.formaPagamento)}</td><td class="r">${f.garrafas}</td><td class="r">${money(f.total)}</td></tr></tfoot></table></div></div>
     ${ajustesHTML(s, f)}
+    ${acertosHTML(s, f)}
     ${repo.length ? `<div class="card mt"><div class="head"><h2>Reposição ${f.reposicaoEnviada ? 'enviada' : 'solicitada'}</h2>${f.remessaId && D.remessas(s).find((r) => r.id === f.remessaId) ? badge(D.STATUS_ENTREGA[D.remessas(s).find((r) => r.id === f.remessaId).status].label, D.STATUS_ENTREGA[D.remessas(s).find((r) => r.id === f.remessaId).status].tone) : ''}</div><div class="list">${repo.map((r) => `<div class="li">${thumb(D.produto(s, r.produtoId), 'sm')}<div class="grow">${esc(D.produto(s, r.produtoId).nome)}</div><b>${r.qtd}</b></div>`).join('')}</div></div>` : ''}`, { back: true });
 }
 

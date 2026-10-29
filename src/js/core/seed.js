@@ -94,10 +94,12 @@ export function seed({ vazio = false } = {}) {
       if (d === c.desde) {
         fisico[c.id] = {};
         const central = D.estoqueCentral(s);
+        const itens = [];
         for (const [pid, par] of Object.entries(c.par)) {
           const q = Math.min(par, central[pid]);
-          if (q > 0) { D.addMov(s, { data: d, tipo: 'remessa', produtoId: pid, qtd: q, clienteId: c.id, obs: 'Consignação inicial' }); fisico[c.id][pid] = q; }
+          if (q > 0) { itens.push({ produtoId: pid, qtd: q }); fisico[c.id][pid] = q; }
         }
+        D.criarRemessa(s, { clienteId: c.id, itens, status: 'entregue', data: d, obs: 'Consignação inicial' });
         proxFech[c.id] = addDays(d, c.cicloDias);
         continue;
       }
@@ -172,5 +174,6 @@ export function seed({ vazio = false } = {}) {
   // um pedido de reposição aguardando aprovação (demonstração)
   D.criarPedido(s, { clienteId: 'cl2', itens: [{ produtoId: 'rufia', qtd: 4 }, { produtoId: 'barolo', qtd: 2 }], obs: 'Evento de vinhos na sexta' }).data = addDays(T, -1);
   for (const c of s.clientes) delete c._porte;
+  D.migrarProtocolos(s);
   return s;
 }

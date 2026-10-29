@@ -61,7 +61,7 @@ export function consignado(s) {
 export const saldoCliente = (s, cid) => consignado(s)[cid] || {};
 
 export function addMov(s, mv) {
-  const m = { id: uid('mv'), data: today(), ...mv };
+  const m = { id: uid('mv'), data: today(), ts: Date.now(), ...mv };
   s.movs.push(m);
   return m;
 }
@@ -71,16 +71,24 @@ export function remessas(s) {
   const g = {};
   for (const m of s.movs) {
     if (m.tipo !== 'remessa' || !m.remessaId) continue;
-    const r = (g[m.remessaId] ||= { id: m.remessaId, clienteId: m.clienteId, data: m.data, status: m.entrega || 'entregue', itens: [], ref: m.ref, obs: m.obs, hist: m.entregaHist || [], entregueEm: m.entregueEm, recebidoPor: m.recebidoPor });
+    const r = (g[m.remessaId] ||= { id: m.remessaId, protocolo: m.protocolo || '', clienteId: m.clienteId, data: m.data, status: m.entrega || 'entregue', itens: [], ref: m.ref, obs: m.obs, hist: m.entregaHist || [], entregueEm: m.entregueEm, recebidoPor: m.recebidoPor });
     r.itens.push({ produtoId: m.produtoId, qtd: m.qtd, movId: m.id });
   }
   return Object.values(g).map((r) => ({ ...r, garrafas: sum(r.itens, (i) => i.qtd), valor: valorItens(s, r.itens) })).sort((a, b) => (a.data + a.id < b.data + b.id ? 1 : -1));
 }
 
+// Protocolo sequencial por ano: REM-2026-0001 (gerado pela Gestão, que enxerga todas as remessas)
+export function proximoProtocolo(s, ano = today().slice(0, 4)) {
+  let max = 0;
+  for (const m of s.movs) { const x = /^REM-(\d{4})-(\d+)$/.exec(m.protocolo || ''); if (x && x[1] === ano) max = Math.max(max, +x[2]); }
+  return `REM-${ano}-${String(max + 1).padStart(4, '0')}`;
+}
+
 export function criarRemessa(s, { clienteId, itens, status = 'a_separar', data = today(), ref, obs }) {
   const remessaId = uid('rm');
+  const protocolo = proximoProtocolo(s, data.slice(0, 4));
   const hist = [{ status, em: new Date().toISOString() }];
-  for (const { produtoId, qtd } of itens) if (qtd > 0) addMov(s, { data, tipo: 'remessa', produtoId, qtd, clienteId, ref, obs, remessaId, entrega: status, entregaHist: hist, ...(status === 'entregue' ? { entregueEm: data } : {}) });
+  for (const { produtoId, qtd } of itens) if (qtd > 0) addMov(s, { data, tipo: 'remessa', produtoId, qtd, clienteId, ref, obs, remessaId, protocolo, entrega: status, entregaHist: hist, ...(status === 'entregue' ? { entregueEm: data } : {}) });
   return remessaId;
 }
 
@@ -91,6 +99,119 @@ export function avancarRemessa(s, remessaId, status, { recebidoPor, data = today
     m.entregaHist = [...(m.entregaHist || []), { status, em: new Date().toISOString() }];
     if (status === 'entregue') { m.entregueEm = data; if (recebidoPor) m.recebidoPor = recebidoPor; }
   }
+}
+
+// Dá protocolo às remessas antigas (agrupa por parceiro + data) e número aos fechamentos sem número.
+// Roda na Gestão; devolve true se alterou algo.
+export function migrarProtocolos(s) {
+  let mudou = false;
+  const semId = s.movs.filter((m) => m.tipo === 'remessa' && !m.remessaId);
+  const grupos = {};
+  for (const m of semId) (grupos[`${m.clienteId}|${m.data}`] ||= []).push(m);
+  for (const k of Object.keys(grupos)) { const rid = uid('rm'); for (const m of grupos[k]) m.remessaId = rid; mudou = true; }
+  const semProt = {};
+  for (const m of s.movs) if (m.tipo === 'remessa' && m.remessaId && !m.protocolo) (semProt[m.remessaId] ||= []).push(m);
+  for (const [rid, ms] of Object.entries(semProt).sort((a, b) => (a[1][0].data + (a[1][0].ts || '') < b[1][0].data + (b[1][0].ts || '') ? -1 : 1))) {
+    const prot = proximoProtocolo(s, ms[0].data.slice(0, 4));
+    for (const m of ms) m.protocolo = prot;
+    mudou = true;
+  }
+  for (const c of s.clientes) {
+    const fs = s.fechamentos.filter((f) => f.clienteId === c.id).sort((a, b) => (a.fim + (a.ts || '') < b.fim + (b.ts || '') ? -1 : 1));
+    fs.forEach((f, i) => { if (!f.numero) { f.numero = `FEC-${c.codigo}-${String(i + 1).padStart(3, '0')}`; mudou = true; } });
+  }
+  return mudou;
+}
+
+// ---------- Lotes (cada remessa entregue é um lote com vencimento próprio) ----------
+// O vendido é atribuído aos lotes mais antigos primeiro (PEPS). O parceiro escolhe quais lotes acertar;
+// o vendido dos lotes não escolhidos fica "a acertar" para o próximo fechamento.
+export function lotes(s, cid, { simular } = {}) {
+  const c = cliente(s, cid);
+  const ciclo = c?.cicloDias || 15;
+  const ls = [];
+  const porId = {};
+  const novo = (id, protocolo, entregueEm) => (porId[id] ||= (ls.push({ id, protocolo, clienteId: cid, entregueEm, itens: {}, ultimoAcerto: null }), ls[ls.length - 1]));
+  const it = (l, pid) => (l.itens[pid] ||= { enviado: 0, vendido: 0, baixa: 0, acertado: 0, agora: 0 });
+  const consumir = (pid, qtd, campo) => {
+    let resto = qtd;
+    for (const l of ls) {
+      if (resto <= 0) break;
+      const x = l.itens[pid]; if (!x) continue;
+      const disp = x.enviado - x.vendido - x.baixa - x.agora;
+      if (disp <= 0) continue;
+      const q = Math.min(disp, resto); x[campo] += q; resto -= q;
+    }
+    if (resto > 0) { const l = [...ls].reverse().find((y) => y.itens[pid]) || novo('sem-lote', 'SEM LOTE', c?.desde || today()); it(l, pid)[campo] += resto; }
+  };
+  const fechs = Object.fromEntries(s.fechamentos.filter((f) => f.clienteId === cid).map((f) => [f.id, f]));
+  const movs = s.movs.filter((m) => m.clienteId === cid).sort((a, b) => {
+    const da = a.tipo === 'remessa' ? a.entregueEm || a.data : a.data, db = b.tipo === 'remessa' ? b.entregueEm || b.data : b.data;
+    return da < db ? -1 : da > db ? 1 : (a.ts || 0) - (b.ts || 0);
+  });
+  for (const m of movs) {
+    if (m.tipo === 'remessa') {
+      if (m.entrega && m.entrega !== 'entregue') continue;
+      const l = novo(m.remessaId || `leg-${m.data}`, m.protocolo || `Remessa ${m.data.split('-').reverse().join('/')}`, m.entregueEm || m.data);
+      it(l, m.produtoId).enviado += m.qtd;
+    } else if (m.tipo === 'consumo') {
+      consumir(m.produtoId, m.qtd, 'vendido');
+    } else if (m.tipo === 'devolucao') consumir(m.produtoId, m.qtd, 'baixa');
+    else if (m.tipo === 'ajuste_parceiro') {
+      if (m.qtd < 0) consumir(m.produtoId, -m.qtd, 'baixa');
+      else it(novo(`aj-${m.id}`, 'AJUSTE', m.data), m.produtoId).enviado += m.qtd;
+    }
+  }
+  ls.sort((a, b) => (a.entregueEm < b.entregueEm ? -1 : a.entregueEm > b.entregueEm ? 1 : 0));
+  // acertos: fechamentos novos guardam por lote; antigos (sem acertos) acertaram tudo o que venderam
+  for (const f of Object.values(fechs)) {
+    if (f.status !== 'aprovado' && f.status !== 'pago') continue;
+    if (f.acertos) for (const a of f.acertos) { const l = porId[a.loteId]; if (l) { it(l, a.produtoId).acertado += a.qtd; if (!l.ultimoAcerto || f.fim > l.ultimoAcerto) l.ultimoAcerto = f.fim; } }
+  }
+  const legados = new Set(Object.values(fechs).filter((f) => !f.acertos).map((f) => f.id));
+  if (legados.size) {
+    // vendas apuradas em fechamentos antigos já foram cobradas por inteiro
+    const vendLeg = {};
+    for (const m of movs) if (m.tipo === 'consumo' && legados.has(m.ref)) vendLeg[m.produtoId] = (vendLeg[m.produtoId] || 0) + m.qtd;
+    for (const [pid, q] of Object.entries(vendLeg)) {
+      let resto = q;
+      for (const l of ls) { const x = l.itens[pid]; if (!x || resto <= 0) continue; const pode = x.vendido - x.acertado; const u = Math.min(pode, resto); if (u > 0) { x.acertado += u; resto -= u; } }
+    }
+    const ultLeg = Object.values(fechs).filter((f) => legados.has(f.id) && f.status !== 'enviado').map((f) => f.fim).sort().pop();
+    if (ultLeg) for (const l of ls) if (l.entregueEm <= ultLeg && (!l.ultimoAcerto || ultLeg > l.ultimoAcerto)) l.ultimoAcerto = ultLeg;
+  }
+  // simulação do fechamento em andamento: vendido de agora entra nos lotes mais antigos
+  if (simular) for (const [pid, q] of Object.entries(simular)) if (q > 0) consumir(pid, q, 'agora');
+  const t = today();
+  return ls.map((l) => {
+    let restante = 0, pendente = 0, agora = 0, valorPendente = 0, enviado = 0;
+    for (const [pid, x] of Object.entries(l.itens)) {
+      const pr = produto(s, pid)?.preco || 0;
+      enviado += x.enviado; restante += x.enviado - x.vendido - x.baixa - x.agora; pendente += x.vendido - x.acertado; agora += x.agora;
+      valorPendente += (x.vendido - x.acertado + x.agora) * pr;
+    }
+    const vence = addDays(l.ultimoAcerto || l.entregueEm, ciclo);
+    const aberto = restante > 0 || pendente + agora > 0;
+    const dias = diffDays(vence, t);
+    return { ...l, enviado, restante, pendente, agora, aAcertar: pendente + agora, valorPendente, vence, dias, aberto,
+      situacao: !aberto ? 'quitado' : dias < 0 ? 'vencido' : dias <= 3 ? 'vencendo' : 'em_dia' };
+  });
+}
+export const SITUACAO_LOTE = { vencido: { label: 'Vencido', tone: 'crit' }, vencendo: { label: 'Vence logo', tone: 'warn' }, em_dia: { label: 'Em dia', tone: 'ok' }, quitado: { label: 'Quitado', tone: '' } };
+export const lotesAbertos = (s, cid, opts) => lotes(s, cid, opts).filter((l) => l.aberto);
+
+// Agenda: próximo fechamento de cada parceiro (período ou lote que vence primeiro)
+export function agendaFechamentos(s) {
+  return s.clientes.filter((c) => c.ativo).map((c) => {
+    const per = periodoAtual(s, c.id);
+    const ls = lotesAbertos(s, c.id);
+    const vencidos = ls.filter((l) => l.situacao === 'vencido'), vencendo = ls.filter((l) => l.situacao === 'vencendo');
+    const proxLote = ls.map((l) => l.vence).sort()[0];
+    const data = [per.previsto, proxLote].filter(Boolean).sort()[0];
+    const rv = vendasCliente(s, c.id, per.marco);
+    const estimado = sum(rv, (v) => v.qtd * v.preco) + sum(ls, (l) => l.valorPendente);
+    return { c, per, lotes: ls, vencidos, vencendo, data, dias: diffDays(data, today()), estimado };
+  }).sort((a, b) => (a.per.pendente ? -1 : 0) - (b.per.pendente ? -1 : 0) || (a.data < b.data ? -1 : 1));
 }
 
 export function emTransito(s) {
@@ -198,7 +319,7 @@ export function sugestaoReposicao(s, cid, contagem) {
   return out;
 }
 
-export function montarFechamento(s, cid, { contagem, reposicao = {}, forma, obs = '', criadoPor = 'cliente', data = today(), esperado = {}, justificativas = {} }) {
+export function montarFechamento(s, cid, { contagem, reposicao = {}, forma, obs = '', criadoPor = 'cliente', data = today(), esperado = {}, justificativas = {}, lotesSel }) {
   const c = cliente(s, cid);
   const per = periodoAtual(s, cid);
   const saldo = saldoCliente(s, cid);
@@ -221,9 +342,23 @@ export function montarFechamento(s, cid, { contagem, reposicao = {}, forma, obs 
       }
       return item;
     });
+  // acerto por lote: vendido de agora (PEPS) + o que ficou a acertar em fechamentos anteriores
+  const ls = lotes(s, cid, { simular: Object.fromEntries(itens.map((i) => [i.produtoId, i.vendido])) }).filter((l) => l.aAcertar > 0);
+  const sel = new Set(lotesSel || ls.map((l) => l.id));
+  const acertos = [];
+  for (const l of ls) {
+    if (!sel.has(l.id)) continue;
+    for (const [pid, x] of Object.entries(l.itens)) {
+      const q = x.vendido - x.acertado + x.agora;
+      if (q > 0) { const pr = produto(s, pid).preco; acertos.push({ loteId: l.id, protocolo: l.protocolo, produtoId: pid, qtd: q, preco: pr, valor: q * pr }); }
+    }
+  }
+  const naoAcertado = sum(ls.filter((l) => !sel.has(l.id)), (l) => l.aAcertar);
   return {
-    id: uid('fc'), clienteId: cid, inicio: per.inicio, fim: data, status: 'enviado', criadoPor,
-    itens, total: sum(itens, (i) => i.valor), garrafas: sum(itens, (i) => i.vendido),
+    id: uid('fc'), numero: `FEC-${c.codigo}-${String(s.fechamentos.filter((f) => f.clienteId === cid).length + 1).padStart(3, '0')}`,
+    clienteId: cid, inicio: per.inicio, fim: data, status: 'enviado', criadoPor,
+    itens, acertos, lotesSel: [...sel].filter((id) => ls.some((l) => l.id === id)), naoAcertado,
+    vendidas: sum(itens, (i) => i.vendido), total: sum(acertos, (a) => a.valor), garrafas: sum(acertos, (a) => a.qtd),
     reposicao: Object.entries(reposicao).filter(([, q]) => q > 0).map(([produtoId, qtd]) => ({ produtoId, qtd })),
     formaPagamento: forma || c.formaPadrao, obs, enviadoEm: data, ts: Date.now(),
     ajustes: itens.filter((i) => i.esperado !== undefined && i.contagem !== i.esperado).length,
@@ -467,6 +602,10 @@ export function insights(s) {
   }
   for (const x of coberturaCentral(s)) {
     if (x.dias < 45 && x.produto.ativo) out.push({ nivel: x.dias < 20 ? 'critico' : 'atencao', icone: 'box', titulo: x.estoque <= 0 ? `${x.produto.nome}: esgotado no estoque central` : `${x.produto.nome}: estoque para ~${Math.floor(x.dias)} dias`, texto: `${x.estoque} garrafas no estoque central, giro de ${(x.giro * 30).toFixed(0)}/mês. Programe nova importação.`, link: `#/estoque` });
+  }
+  for (const c of s.clientes.filter((x) => x.ativo)) {
+    const venc = lotesAbertos(s, c.id).filter((l) => l.situacao === 'vencido' && (l.aAcertar > 0 || l.restante > 0));
+    if (venc.length) out.push({ nivel: 'atencao', icone: 'calendar', titulo: `${c.nome}: ${venc.length} lote(s) vencido(s)`, texto: venc.map((l) => `${l.protocolo} (venceu ${l.vence.split('-').reverse().join('/')})`).join(', '), link: `#/parceiro/${c.id}?tab=estoque` });
   }
   for (const r of remessas(s).filter((x) => x.status !== 'entregue')) {
     const dias = diffDays(t, r.data);
