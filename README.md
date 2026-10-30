@@ -7,7 +7,7 @@ Controle de estoque, consignação, fechamentos e financeiro da **Mil Terras** (
 | **Mil Terras Gestão** | Distribuidora | `/gestor/` · demo: `/gestor/?demo=1` (PIN `0000`) |
 | **Mil Terras Parceiro** | Restaurantes, bares e lojas | `/cliente/` · demo: `/cliente/?demo=1` (código `BELLA`, PIN `1234`) |
 
-Endereço publicado: **https://rodrigopiratini.github.io/Mil_Terras/** · Passo a passo para colocar no ar: [`docs/INSTALACAO.md`](docs/INSTALACAO.md).
+Endereço publicado: **https://rodrigopiratini.github.io/MilTerras/** · Passo a passo para colocar no ar: [`docs/INSTALACAO.md`](docs/INSTALACAO.md).
 
 A proposta completa (funcionalidades, inteligência e roteiro) está em [`docs/PROPOSTA.md`](docs/PROPOSTA.md).
 

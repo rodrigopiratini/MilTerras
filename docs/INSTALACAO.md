@@ -1,12 +1,12 @@
 # Colocar os apps no ar (uma vez só, ~10 minutos)
 
 ## 1. Publicar o site (GitHub Pages)
-1. No GitHub, abra o repositório **Mil_Terras** › **Settings** › **Pages**.
+1. No GitHub, abra o repositório **MilTerras** › **Settings** › **Pages**.
 2. Em **Build and deployment › Source**, escolha **GitHub Actions**.
 3. Pronto. A cada atualização o site é publicado sozinho em:
-   **https://rodrigopiratini.github.io/Mil_Terras/**
-   - Gestão: `…/Mil_Terras/gestor/`
-   - Parceiro: `…/Mil_Terras/cliente/`
+   **https://rodrigopiratini.github.io/MilTerras/**
+   - Gestão: `…/MilTerras/gestor/`
+   - Parceiro: `…/MilTerras/cliente/`
    - Demonstração (dados fictícios, só no navegador): `…/gestor/?demo=1` e `…/cliente/?demo=1`
 
 ## 2. Criar o banco (Supabase, plano gratuito)
@@ -15,7 +15,7 @@
 2. **SQL Editor › New query**: cole todo o conteúdo de [`supabase/instalar.sql`](../supabase/instalar.sql) e clique em **Run**.
    No final aparece o **CÓDIGO DE INSTALAÇÃO**: guarde-o (é usado para criar o acesso do gestor).
 3. **Authentication › Sign In / Providers**: ative **Allow anonymous sign-ins** (é assim que os parceiros entram com código + PIN).
-4. **Authentication › URL Configuration**: em **Site URL** coloque `https://rodrigopiratini.github.io/Mil_Terras/gestor/`.
+4. **Authentication › URL Configuration**: em **Site URL** coloque `https://rodrigopiratini.github.io/MilTerras/gestor/`.
 5. **Project Settings › API**: copie a **Project URL** e a **Publishable key** (ou "anon public").
    ⚠️ Nunca compartilhe a chave `service_role`/`secret`.
 
