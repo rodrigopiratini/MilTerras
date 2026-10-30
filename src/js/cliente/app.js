@@ -23,6 +23,9 @@ let current = {};
 let handlers = {};
 let wz = null;
 
+// Selo de preço especial (promoção da Mil Terras para este parceiro)
+const promo = (s, c, pid) => { const x = D.promocao(s, c, pid); return x ? ` <span class="badge ok">preço especial${x.ate ? ' até ' + dateShort(x.ate) : ''}</span>` : ''; };
+
 function shell(title, content, { back } = {}) {
   const c = C();
   const route = '#' + (location.hash.slice(1).split('?')[0] || '');
@@ -156,10 +159,10 @@ function vEstoque() {
   const est = D.saldoEstimado(s, c.id);
   const saldo = D.saldoCliente(s, c.id);
   const pids = Object.keys(saldo).filter((p) => saldo[p] > 0);
-  const valor = sum(pids, (p) => (est[p] || 0) * D.produto(s, p).preco);
+  const valor = sum(pids, (p) => (est[p] || 0) * D.precoParceiro(s, c, p));
   return shell('Meu estoque', `
     ${pageHead('Meu estoque Mil Terras', `${plural(sum(pids, (p) => est[p] || 0), 'garrafa')} · ${money0(valor)} em consignação, sem custo para você`)}
-    <div class="card pad-0"><div class="list" style="padding:0 16px">${pids.map((pid) => { const p = D.produto(s, pid); const r = D.taxaDiaria(s, c.id, pid) * 7; return `<div class="li click" data-act="ficha" data-p="${pid}">${thumb(p)}<div class="grow"><div class="t">${esc(p.nome)}</div><div class="s">${p.tipo} · ${esc(p.regiao)} · vende ~${r.toFixed(1).replace('.', ',')}/semana</div><div class="s">Carta ${money(D.precoCarta(s, c, pid))} · custo ${money(p.preco)}</div></div>${qtdBadge(est[pid] || 0)}</div>`; }).join('')}</div></div>
+    <div class="card pad-0"><div class="list" style="padding:0 16px">${pids.map((pid) => { const p = D.produto(s, pid); const r = D.taxaDiaria(s, c.id, pid) * 7; return `<div class="li click" data-act="ficha" data-p="${pid}">${thumb(p)}<div class="grow"><div class="t">${esc(p.nome)}</div><div class="s">${p.tipo} · ${esc(p.regiao)} · vende ~${r.toFixed(1).replace('.', ',')}/semana</div><div class="s">Carta ${money(D.precoCarta(s, c, pid))} · custo ${money(D.precoParceiro(s, c, pid))}${promo(s, c, pid)}</div></div>${qtdBadge(est[pid] || 0)}</div>`; }).join('')}</div></div>
     <div class="tiny muted mt-s">Quantidade estimada = saldo do último fechamento + reposições − vendas registradas no app.</div>`, { back: true });
 }
 
@@ -240,6 +243,7 @@ function vFechamento({ id, query }) {
     <div class="card pad-0"><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Vinho</th><th class="r">Saldo</th><th class="r">Contado</th><th class="r">Vendido</th><th class="r">Valor</th></tr></thead>
       <tbody>${f.itens.map((i) => `<tr><td>${esc(D.produto(s, i.produtoId).nome)}</td><td class="r">${i.saldoAnterior}</td><td class="r">${i.contagem}</td><td class="r"><b>${i.vendido}</b></td><td class="r">${money(i.valor)}</td></tr>`).join('')}</tbody>
       <tfoot><tr><td colspan="3">Total · ${esc(f.formaPagamento)}</td><td class="r">${f.garrafas}</td><td class="r">${money(f.total)}</td></tr></tfoot></table></div></div>
+    ${f.pagamentos?.length ? `<div class="card mt"><div class="head"><h2>Pagamentos registrados</h2><span class="small muted">${f.status === 'pago' ? 'quitado' : `faltam ${money(D.saldoAberto(f))}`}</span></div><div class="list">${f.pagamentos.map((p) => `<div class="li"><div class="grow"><div class="t">${esc(p.forma)}${p.parcelas > 1 ? ` em ${p.parcelas}x` : ''}</div><div class="s">${date(p.data)}</div></div><b class="num">${money(p.valor)}</b></div>`).join('')}</div></div>` : ''}
     ${ajustesHTML(s, f)}
     ${acertosHTML(s, f)}
     ${repo.length ? `<div class="card mt"><div class="head"><h2>Reposição ${f.reposicaoEnviada ? 'enviada' : 'solicitada'}</h2>${f.remessaId && D.remessas(s).find((r) => r.id === f.remessaId) ? badge(D.STATUS_ENTREGA[D.remessas(s).find((r) => r.id === f.remessaId).status].label, D.STATUS_ENTREGA[D.remessas(s).find((r) => r.id === f.remessaId).status].tone) : ''}</div><div class="list">${repo.map((r) => `<div class="li">${thumb(D.produto(s, r.produtoId), 'sm')}<div class="grow">${esc(D.produto(s, r.produtoId).nome)}</div><b>${r.qtd}</b></div>`).join('')}</div></div>` : ''}`, { back: true });
@@ -284,10 +288,10 @@ function vAjustes() {
         <div class="list">${c.garcons.filter((g) => g.ativo).map((g) => `<div class="li"><div class="avatar">${iniciais(g.nome)}</div><div class="grow t">${esc(g.nome)}</div><button class="iconbtn" data-act="rmG" data-id="${g.id}" aria-label="Remover">${icon('trash')}</button></div>`).join('')}</div>
         <form class="row mt" data-onsubmit="addG"><input class="input" name="nome" placeholder="Nome do garçom" required><button class="btn">${icon('plus')}</button></form></div>
       <div class="card"><div class="head"><h2>Preços na sua carta</h2></div><div class="small muted mb">Usados para calcular sua receita e lucro. O custo é o preço de tabela Mil Terras.</div>
-        <form data-onsubmit="precos"><div class="list">${pids.map((p) => `<div class="li"><div class="grow"><div class="t">${esc(p.nome)}</div><div class="s">custo ${money(p.preco)}</div></div>${moneyInput(p.id, D.precoCarta(s, c, p.id), { width: 130 })}</div>`).join('')}</div><button class="btn block mt">Salvar preços</button></form></div>
+        <form data-onsubmit="precos"><div class="list">${pids.map((p) => `<div class="li"><div class="grow"><div class="t">${esc(p.nome)}</div><div class="s">custo ${money(D.precoParceiro(s, c, p.id))}${promo(s, c, p.id)}</div></div>${moneyInput(p.id, D.precoCarta(s, c, p.id), { width: 130 })}</div>`).join('')}</div><button class="btn block mt">Salvar preços</button></form></div>
     </div>
     <div class="card mt"><div class="head"><h2>Seu cadastro na Mil Terras</h2></div><div class="grid g3 small">
-      <div><div class="label">Formas de pagamento</div>${c.formasPagamento.join(', ')}</div><div><div class="label">Prazo</div>${c.prazoDias} dias após conferência</div><div><div class="label">Ciclo</div>a cada ${c.cicloDias} dias</div></div>
+      <div><div class="label">Formas de pagamento</div>${esc([...(c.condicoes || []).map(D.descCondicao), ...c.formasPagamento].join(' · '))}</div><div><div class="label">Prazo</div>${c.prazoDias} dias após conferência</div><div><div class="label">Ciclo</div>a cada ${c.cicloDias} dias</div></div>
       <div class="tiny muted mt">Para alterar, fale com a Mil Terras.</div></div>`, { back: true });
 }
 
@@ -326,9 +330,9 @@ function vPedido({ query }) {
     ${pageHead('Pedir reposição', 'Escolha os vinhos e as quantidades. Você só consegue pedir o que a Mil Terras tem disponível agora.')}
     ${pendFech ? `<div class="ajuste-box mb">Seu fechamento já está em conferência e inclui um pedido de reposição. Use esta tela só para itens extras.</div>` : ''}
     <div class="card pad-0"><div class="list" style="padding:0 14px">${lista.map((p) => { const d = Math.max(0, disp[p.id] || 0); return `<div class="li ${d ? '' : 'off'}">${thumb(p, 'sm')}<div class="grow"><div class="t">${esc(p.nome)} ${recs.includes(p.id) && !(est[p.id] > 0) ? badge('Sugestão', 'opp') : ''}</div>
-      <div class="s">Na casa: ${est[p.id] || 0} · ${money(p.preco)}</div><div class="s" style="color:${d ? 'var(--ok)' : 'var(--crit)'}">${d ? `${d} disponíveis` : 'Sem estoque disponível'}</div></div>${stepper('ped:' + p.id, Math.min(rascunho[p.id] || 0, d), { max: d })}</div>`; }).join('')}</div></div>
+      <div class="s">Na casa: ${est[p.id] || 0} · ${money(D.precoParceiro(s, c, p.id))}${promo(s, c, p.id)}</div><div class="s" style="color:${d ? 'var(--ok)' : 'var(--crit)'}">${d ? `${d} disponíveis` : 'Sem estoque disponível'}</div></div>${stepper('ped:' + p.id, Math.min(rascunho[p.id] || 0, d), { max: d })}</div>`; }).join('')}</div></div>
     <label class="field mt"><span>Observação</span><input class="input" id="pedObs" maxlength="200" placeholder="Ex.: entregar até sexta"></label>
-    <div class="row between wz-foot"><div><div class="label">Total do pedido</div><b>${plural(sum(itens, (i) => i.qtd), 'garrafa')} · ${money(D.valorItens(s, itens))}</b></div>
+    <div class="row between wz-foot"><div><div class="label">Total do pedido</div><b>${plural(sum(itens, (i) => i.qtd), 'garrafa')} · ${money(D.valorItens(s, itens, c))}</b></div>
       <button class="btn ok" data-act="enviarPedido" ${itens.length ? '' : 'disabled'}>${icon('check')} Enviar pedido</button></div>
     ${meus.length ? `<h2 class="mt">Meus pedidos</h2><div class="card pad-0 mt-s"><div class="list" style="padding:0 16px">${meus.map((p) => { const r = p.remessaId && D.remessas(s).find((x) => x.id === p.remessaId); return `<div class="li"><div class="grow"><div class="t">${date(p.data)} · ${plural(sum(p.itens, (i) => i.qtd), 'garrafa')} · ${money(D.valorItens(s, p.itens))}</div>
       <div class="s">${p.itens.map((i) => `${i.qtd}× ${esc(D.produto(s, i.produtoId)?.nome)}`).join(', ')}</div>${p.motivo ? `<div class="s" style="color:var(--crit)">${esc(p.motivo)}</div>` : ''}</div>

@@ -43,3 +43,13 @@ Quando uma nova versão pedir, cole de novo o `supabase/instalar.sql` inteiro no
 3. A pessoa abre a Gestão › **Primeiro acesso**, cria e-mail e senha e informa o código.
 
 Papéis: **Dono** (você) administra a equipe; **Gestor** opera tudo, mas não pode remover o dono nem convidar/remover pessoas. Não adicione a pessoa ao Supabase nem como colaborador no GitHub: assim ela não tem acesso ao banco nem pode alterar o código.
+
+## Zerar a operação (manter só a carta de vinhos)
+Para apagar parceiros, estoque, remessas, vendas, fechamentos, pedidos e despesas e começar do zero:
+Supabase › **SQL Editor › New query**, cole todo o conteúdo de [`supabase/limpar.sql`](../supabase/limpar.sql) e clique em **Run**.
+Os rótulos (com preços e custos), as configurações e os acessos de gestão são mantidos. **Não tem volta**: exporte um backup antes se quiser guardar o histórico.
+
+## Condições de pagamento e preços especiais
+Em Gestão › **Parceiros › (parceiro) › Pagamento e preços**:
+- **Condições de pagamento**: combine formas, ex.: 40% em dinheiro + restante no cartão em 3x. O parceiro escolhe a condição no fechamento; ao registrar o recebimento os valores já vêm divididos (dá para ajustar e também registrar pagamento parcial).
+- **Preços especiais**: valor cobrado só daquele parceiro no lugar do preço de tabela, com data final opcional para promoções.

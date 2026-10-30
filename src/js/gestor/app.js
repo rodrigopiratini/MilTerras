@@ -77,7 +77,7 @@ function graficoParceiros(s) {
   const cm = D.custosMedios(s);
   const itens = s.clientes.filter((c) => c.ativo).map((c) => {
     const m = cons[c.id] || {};
-    return { c, q: sum(Object.values(m)), custo: sum(Object.entries(m), ([pid, q]) => q * cm[pid]), venda: sum(Object.entries(m), ([pid, q]) => q * D.produto(s, pid).preco) };
+    return { c, q: sum(Object.values(m)), custo: sum(Object.entries(m), ([pid, q]) => q * cm[pid]), venda: D.valorConsignado(s, c, m) };
   }).sort((a, b) => b.q - a.q);
   if (!itens.length) return empty('Cadastre o primeiro parceiro.', 'store');
   return hbars(itens.map((x) => ({ label: x.c.nome, value: x.q, vtxt: `${int(x.q)} gf · ${moneyK(x.custo)}`, sub: `${money0(x.custo)} a custo · ${money0(x.venda)} a preço de venda<br>Clique para ver o detalhamento`, attrs: `data-act="consigDet" data-c="${x.c.id}" data-busca="${esc(x.c.nome + ' ' + x.c.cidade)}"` })), (v) => int(v) + ' gf', { color: 'var(--dourado)' });
@@ -98,7 +98,7 @@ function modalConsig(cid) {
   const m = modal({ title: esc(c.nome), wide: true, body: `
     <div class="grid g3 mb"><div class="kpi"><div class="label">Garrafas</div><div class="v">${sum(Object.values(saldo))}</div></div>
       <div class="kpi"><div class="label">A custo</div><div class="v">${moneyK(sum(Object.entries(saldo), ([pid, q]) => q * cm[pid]))}</div></div>
-      <div class="kpi"><div class="label">A preço de venda</div><div class="v">${moneyK(sum(Object.entries(saldo), ([pid, q]) => q * D.produto(s, pid).preco))}</div></div></div>
+      <div class="kpi"><div class="label">A preço de venda</div><div class="v">${moneyK(D.valorConsignado(s, c, saldo))}</div></div></div>
     ${transito.length ? `<div class="ajuste-box mb">${icon('truck')} ${plural(sum(transito, (r) => r.garrafas), 'garrafa')} em remessa ainda não entregue (${transito.map((r) => r.protocolo).join(', ')}).</div>` : ''}
     ${abertos.length ? `<div class="small mb"><b>Lotes em aberto:</b> ${abertos.map((l) => `${esc(l.protocolo)} ${badge(D.SITUACAO_LOTE[l.situacao].label + ' · ' + date(l.vence), D.SITUACAO_LOTE[l.situacao].tone)}`).join(' ')}</div>` : ''}
     <form id="fcons" class="col">
@@ -144,7 +144,7 @@ function modalOndeEsta(pid) {
     <div class="list">
       <a class="li" href="#/produto/${pid}" data-act="close"><div class="avatar">${icon('box')}</div><div class="grow"><div class="t">Estoque central</div><div class="s">Depósito Mil Terras</div></div><b>${est}</b></a>
       ${trans.map(({ r, q }) => `<a class="li" href="#/remessas" data-act="close"><div class="avatar">${icon('truck')}</div><div class="grow"><div class="t">Em trânsito · ${esc(r.protocolo)}</div><div class="s">${esc(D.cliente(s, r.clienteId)?.nome)} · ${D.STATUS_ENTREGA[r.status].label}</div></div><b>${q}</b></a>`).join('')}
-      ${parc.map(({ c, q }) => `<a class="li" href="#/parceiro/${c.id}?tab=estoque" data-act="close"><div class="avatar">${iniciais(c.nome)}</div><div class="grow"><div class="t">${esc(c.nome)}</div><div class="s">${esc(c.cidade || '')} · ${money(q * p.preco)}</div></div><b>${q}</b></a>`).join('') || '<div class="empty small">Nenhum parceiro com este rótulo.</div>'}
+      ${parc.map(({ c, q }) => `<a class="li" href="#/parceiro/${c.id}?tab=estoque" data-act="close"><div class="avatar">${iniciais(c.nome)}</div><div class="grow"><div class="t">${esc(c.nome)}</div><div class="s">${esc(c.cidade || '')} · ${money(q * D.precoParceiro(s, c, p.id))}</div></div><b>${q}</b></a>`).join('') || '<div class="empty small">Nenhum parceiro com este rótulo.</div>'}
     </div>`,
     handlers: { close: (el) => { closeModal(); if (el.getAttribute?.('href')) location.hash = el.getAttribute('href'); } } });
 }
@@ -158,7 +158,7 @@ function vPainel() {
   const diasMes = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate();
   const projecao = (mes.receita / diaMes) * diasMes;
   const cr = D.contasReceber(s);
-  const vencido = sum(cr.filter((x) => x.atraso > 0), (x) => x.total);
+  const vencido = sum(cr.filter((x) => x.atraso > 0), (x) => x.saldo);
   const est = D.estoqueCentral(s);
   const cons = D.consignado(s);
   const gCentral = sum(Object.values(est));
@@ -181,7 +181,7 @@ function vPainel() {
     ${pageHead(`Olá, ${s.meta.empresa}`, new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' }), `<a class="btn ghost" href="#/consignacao?nova=1">${icon('truck')} Nova remessa</a><a class="btn" href="#/estoque?entrada=1">${icon('plus')} Entrada</a>`)}
     <div class="grid g4">
       ${kpi('Faturamento do mês', moneyK(mes.receita), `Projeção ${moneyK(projecao)} · <b class="${delta >= 0 ? 'up' : 'down'}">${delta >= 0 ? '▲' : '▼'} ${percent(Math.abs(delta))}</b> vs ${monthLabel(ant.mes)}`)}
-      ${kpi('A receber', moneyK(sum(cr, (x) => x.total)), `${plural(cr.length, 'título')}${vencido ? ` · <b class="down">${moneyK(vencido)} vencido</b>` : ' · nada vencido'}`)}
+      ${kpi('A receber', moneyK(sum(cr, (x) => x.saldo)), `${plural(cr.length, 'título')}${vencido ? ` · <b class="down">${moneyK(vencido)} vencido</b>` : ' · nada vencido'}`)}
       ${kpi('Estoque central', int(gCentral) + ' gf', `${moneyK(vCentral)} a custo`)}
       ${kpi('Em consignação', int(gCons) + ' gf', `${moneyK(cCons)} a custo · ${nParc} parceiros${transito ? ` · <b>${transito} em trânsito</b>` : ''}`)}
     </div>
@@ -339,7 +339,7 @@ function vConsignacao({ query }) {
   const prods = s.produtos.filter((p) => cls.some((c) => (cons[c.id]?.[p.id] || 0) > 0));
   if (query.nova) setTimeout(() => modalRemessa(query.cliente), 0);
   const tot = (c) => sum(Object.values(cons[c.id] || {}));
-  const val = (c) => sum(Object.entries(cons[c.id] || {}), ([pid, q]) => q * D.produto(s, pid).preco);
+  const val = (c) => D.valorConsignado(s, c, cons[c.id] || {});
   const cm = D.custosMedios(s);
   const cus = (c) => sum(Object.entries(cons[c.id] || {}), ([pid, q]) => q * cm[pid]);
   return shell('Consignação', `
@@ -471,14 +471,14 @@ function vParceiro({ id, query }) {
   const rec90 = sum(fs.filter((f) => f.fim > desde), (f) => f.total);
   const cr = D.contasReceber(s).filter((f) => f.clienteId === id);
   const cmP = D.custosMedios(s);
-  const tabs = [['visao', 'Visão geral'], ['estoque', 'Consignado'], ['fechamentos', 'Fechamentos'], ['equipe', 'Equipe e vendas'], ['cadastro', 'Cadastro']];
+  const tabs = [['visao', 'Visão geral'], ['estoque', 'Consignado'], ['fechamentos', 'Fechamentos'], ['equipe', 'Equipe e vendas'], ['pagamento', 'Pagamento e preços'], ['cadastro', 'Cadastro']];
   let body = '';
   if (tab === 'visao') {
     const serie = fs.slice(0, 10).reverse();
     body = `<div class="grid g4">
       ${kpi('Receita 90 dias', money0(rec90), `${sum(fs.filter((f) => f.fim > desde), (f) => f.garrafas)} garrafas`)}
-      ${kpi('Em consignação', `${sum(Object.values(saldo))} gf`, `${money0(sum(Object.entries(saldo), ([p, q]) => q * cmP[p]))} a custo · ${money0(sum(Object.entries(saldo), ([p, q]) => q * D.produto(s, p).preco))} venda`)}
-      ${kpi('A receber', money0(sum(cr, (f) => f.total)), cr.some((f) => f.atraso) ? `<b class="down">vencido há ${Math.max(...cr.map((f) => f.atraso))} dias</b>` : cr.length ? 'em dia' : 'nada em aberto')}
+      ${kpi('Em consignação', `${sum(Object.values(saldo))} gf`, `${money0(sum(Object.entries(saldo), ([p, q]) => q * cmP[p]))} a custo · ${money0(D.valorConsignado(s, c, saldo))} venda`)}
+      ${kpi('A receber', money0(sum(cr, (f) => f.saldo)), cr.some((f) => f.atraso) ? `<b class="down">vencido há ${Math.max(...cr.map((f) => f.atraso))} dias</b>` : cr.length ? 'em dia' : 'nada em aberto')}
       ${kpi('Período atual', per.pendente ? 'Enviado' : relDays(per.previsto), per.pendente ? 'aguardando sua conferência' : `fechamento em ${date(per.previsto)}`)}
     </div>
     <div class="grid g2 mt">
@@ -512,12 +512,59 @@ function vParceiro({ id, query }) {
         <div class="small muted mt">Argumento comercial: mostre ao parceiro quanto ele lucrou com a Mil Terras sem investir em estoque.</div></div></div>
       <div class="card mt"><div class="head"><h2>Equipe cadastrada</h2></div><div class="chips">${gs.map((g) => `<span class="chip">${esc(g.nome)}</span>`).join('')}</div></div>`;
   }
+  if (tab === 'pagamento') body = abaPagamento(s, c);
   if (tab === 'cadastro') body = formCliente(c);
   return shell(c.nome, `
     <div class="pagehead"><div class="row"><div class="avatar" style="width:52px;height:52px;font-size:18px">${iniciais(c.nome)}</div><div><h1>${esc(c.nome)}</h1><div class="sub">${c.tipo} · ${esc(c.cidade)} · ${esc(c.contato)} · ${esc(c.telefone)}</div></div></div>
       <div class="row wrap"><a class="btn ghost" target="_blank" rel="noopener" href="${waLink(c.telefone, `Olá ${c.contato.split(' ')[0]}, tudo bem? Aqui é da Mil Terras.`)}">${icon('whatsapp')} WhatsApp</a>${verApp(c.id, 'btn ghost')}<a class="btn" href="#/novo-fechamento/${c.id}">${icon('receipt')} Fechamento</a></div></div>
     <div class="seg mb" style="overflow-x:auto;max-width:100%">${tabs.map(([k, n]) => `<button class="${tab === k ? 'on' : ''}" data-act="goto" data-h="#/parceiro/${id}?tab=${k}">${n}</button>`).join('')}</div>
     ${body}`, { back: true });
+}
+
+// Condições de pagamento e preços especiais (promoções) do parceiro
+function abaPagamento(s, c) {
+  const conds = c.condicoes || [];
+  const padrao = (v) => c.formaPadrao === v;
+  const ativos = sortBy(s.produtos.filter((p) => p.ativo || c.precos?.[p.id]), (p) => p.nome);
+  const nPromo = ativos.filter((p) => D.promocao(s, c, p.id)).length;
+  return `<div class="card"><div class="head"><h2>Condições de pagamento</h2><button class="btn sm" data-act="condNova" data-c="${c.id}">${icon('plus')} Nova condição</button></div>
+      <p class="small muted" style="margin-top:0">Combine formas num mesmo pagamento, ex.: parte em dinheiro e o restante no cartão em 3x. O parceiro escolhe a condição no fechamento e, ao registrar o recebimento, os valores já vêm divididos.</p>
+      <div class="list">${conds.map((x) => `<div class="li"><div class="grow"><div class="t">${esc(D.descCondicao(x))} ${padrao('cond:' + x.id) ? badge('Padrão', 'ok') : ''}</div></div>
+        ${padrao('cond:' + x.id) ? '' : `<button class="btn ghost sm" data-act="condPadrao" data-c="${c.id}" data-v="cond:${x.id}">Tornar padrão</button>`}<button class="iconbtn" data-act="condDel" data-c="${c.id}" data-id="${x.id}" title="Excluir">${icon('x')}</button></div>`).join('')}
+        ${c.formasPagamento.map((f) => `<div class="li"><div class="grow"><div class="t">${esc(f)} ${padrao(f) ? badge('Padrão', 'ok') : ''}</div><div class="s">forma simples (altere em Cadastro)</div></div>${padrao(f) ? '' : `<button class="btn ghost sm" data-act="condPadrao" data-c="${c.id}" data-v="${esc(f)}">Tornar padrão</button>`}</div>`).join('')}</div></div>
+    <form class="card mt" data-onsubmit="salvarPrecos" data-c="${c.id}"><div class="head"><h2>Preços especiais</h2>${nPromo ? badge(`${nPromo} ativo${nPromo > 1 ? 's' : ''}`, 'ok') : ''}</div>
+      <p class="small muted" style="margin-top:0">Valor cobrado deste parceiro no lugar do preço de tabela. Deixe em 0,00 para usar a tabela. Com data final, a promoção acaba sozinha. Vale para os fechamentos feitos enquanto estiver ativo.</p>
+      <div class="list">${ativos.map((p) => { const x = c.precos?.[p.id]; const on = D.promocao(s, c, p.id); return `<div class="li wrap">${thumb(p, 'sm')}<div class="grow" style="min-width:140px"><div class="t">${esc(p.nome)}</div><div class="s">Tabela ${money(p.preco)}${x && !on ? ' · <span style="color:var(--warn)">promoção encerrada</span>' : on ? ` · <b style="color:var(--ok)">${percent((p.preco - on.valor) / p.preco)} de desconto</b>` : ''}</div></div>
+        ${moneyInput('v:' + p.id, x?.valor || 0, { width: 120 })}<label class="field" style="margin:0"><input class="input" type="date" name="ate:${p.id}" value="${esc(x?.ate || '')}" title="Válido até (opcional)" style="width:150px"></label></div>`; }).join('')}</div>
+      <div class="row between wrap mt"><span class="tiny muted">Data em branco = sem prazo.</span><button class="btn">Salvar preços</button></div></form>`;
+}
+
+function modalCondicao(cid) {
+  let partes = [{ forma: 'Dinheiro', pct: 50, parcelas: 1 }, { forma: 'Cartão de crédito', pct: 50, parcelas: 3 }];
+  const ler = () => { const f = document.getElementById('fcond'); if (f) partes = partes.map((_, i) => ({ forma: f.elements['f' + i].value, pct: +f.elements['p' + i]?.value || 0, parcelas: Math.max(1, +f.elements['n' + i].value || 1) })); };
+  const corpo = () => `<form id="fcond" class="col"><p class="small muted" style="margin-top:0">A última forma fica com o restante do valor.</p>
+    ${partes.map((p, i) => `<div class="row gap-s wrap"><select class="input" name="f${i}" style="flex:1;min-width:150px">${D.FORMAS_PAGAMENTO.map((x) => `<option ${x === p.forma ? 'selected' : ''}>${x}</option>`).join('')}</select>
+      ${i < partes.length - 1 ? `<label class="row gap-s small"><input class="input" name="p${i}" type="number" min="1" max="99" value="${p.pct}" style="width:70px">%</label>` : '<span class="small muted" style="width:90px">restante</span>'}
+      <label class="row gap-s small"><input class="input" name="n${i}" type="number" min="1" max="24" value="${p.parcelas}" style="width:64px">x</label>
+      ${partes.length > 1 ? `<button type="button" class="iconbtn" data-act="tira" data-i="${i}" title="Remover">${icon('x')}</button>` : ''}</div>`).join('')}
+    <button type="button" class="btn ghost sm" data-act="poe" style="align-self:flex-start">${icon('plus')} Adicionar forma</button>
+    <div class="small ink2" id="cond-desc">${esc(D.descCondicao({ partes }))}</div></form>`;
+  const redesenhar = () => { m.querySelector('.mb').innerHTML = corpo(); };
+  const m = modal({ title: 'Nova condição de pagamento', body: corpo(),
+    foot: `<button class="btn ghost" data-act="close">Cancelar</button><button class="btn" data-act="ok">Salvar condição</button>`,
+    handlers: {
+      poe: () => { ler(); partes.push({ forma: 'PIX', pct: 0, parcelas: 1 }); redesenhar(); },
+      tira: (el) => { ler(); partes.splice(+el.dataset.i, 1); redesenhar(); },
+      ok: () => {
+        ler();
+        const soma = sum(partes.slice(0, -1), (p) => p.pct);
+        if (partes.length > 1 && (partes.slice(0, -1).some((p) => p.pct <= 0) || soma >= 100)) return toast('Os percentuais precisam ser maiores que zero e somar menos de 100%');
+        const cond = { id: uid('cp'), partes: partes.map((p, i) => ({ forma: p.forma, pct: i < partes.length - 1 ? p.pct : 100 - soma, parcelas: p.parcelas })) };
+        store.commit((st) => { const c = D.cliente(st, cid); (c.condicoes ||= []).push(cond); });
+        closeModal(); toast('Condição cadastrada');
+      },
+    } });
+  m.addEventListener('input', () => { ler(); const d = m.querySelector('#cond-desc'); if (d) d.textContent = D.descCondicao({ partes }); });
 }
 
 // Código de acesso aleatório e único (sem letras/números que confundem: 0/O, 1/I)
@@ -591,10 +638,11 @@ function vFechamento({ id }) {
       <div class="row wrap"><a class="btn ghost" href="#/imprimir/fechamento/${f.id}">${icon('print')} Relatório</a><a class="btn ghost" target="_blank" rel="noopener" href="${waLink(c.telefone, txt)}">${icon('whatsapp')} Enviar</a>
       ${f.status === 'enviado' ? `<button class="btn ok" data-act="aprovar" data-id="${f.id}">${icon('check')} Conferir e aprovar</button>` : ''}
       ${f.status === 'aprovado' ? `<button class="btn ok" data-act="pagar" data-id="${f.id}">${icon('money')} Registrar pagamento</button>` : ''}</div></div>
-    <div class="grid g4">${kpi('A pagar', money(f.total), `${f.garrafas} garrafas acertadas${f.naoAcertado ? ` · ${f.naoAcertado} para depois` : ''}`)}
-      <div class="card kpi"><div class="label">Forma de pagamento</div>${f.status === 'pago' ? `<div class="v">${esc(f.formaPagamento || '—')}</div>` : `<select class="input" data-onchange="formaFech" data-id="${f.id}" style="font-weight:600">${[...new Set([...c.formasPagamento, ...D.FORMAS_PAGAMENTO])].map((x) => `<option ${x === f.formaPagamento ? 'selected' : ''}>${x}${c.formasPagamento.includes(x) ? '' : ' (fora do cadastro)'}</option>`).join('')}</select>`}<div class="d">${f.vencimento ? `vence ${date(f.vencimento)}` : `prazo ${c.prazoDias} dias após aprovação`}</div></div>
+    <div class="grid g4">${kpi('A pagar', money(f.total), f.pagamentos?.length && f.status === 'aprovado' ? `<b>${money(D.saldoAberto(f))} em aberto</b> · ${money(D.recebido(f))} recebido` : `${f.garrafas} garrafas acertadas${f.naoAcertado ? ` · ${f.naoAcertado} para depois` : ''}`)}
+      <div class="card kpi"><div class="label">Forma de pagamento</div>${f.status === 'pago' ? `<div class="v">${esc(f.formaPagamento || '—')}</div>` : `<select class="input" data-onchange="formaFech" data-id="${f.id}" style="font-weight:600">${opcoesForma(c, f)}</select>`}<div class="d">${f.vencimento ? `vence ${date(f.vencimento)}` : `prazo ${c.prazoDias} dias após aprovação`}</div></div>
       ${kpi('Ajustes de contagem', f.ajustes ? `<span style="color:var(--warn)">${f.ajustes}</span>` : '0', f.ajustes ? 'com justificativa do parceiro' : `${f.garrafas ? Math.round((100 * reg) / f.garrafas) : 100}% das vendas lançadas no app`)}
       ${kpi('Reposição', plural(sum(repo, (r) => r.qtd), 'garrafa'), f.status === 'enviado' ? 'solicitada' : f.remessaId ? `<a href="#/remessas">${(D.remessas(s).find((r) => r.id === f.remessaId) || {}).status ? D.STATUS_ENTREGA[D.remessas(s).find((r) => r.id === f.remessaId).status].label : 'enviada'}</a>` : 'enviada')}</div>
+    ${f.pagamentos?.length ? `<div class="card mt"><div class="head"><h2>Recebimentos</h2><span class="small muted">${money(D.recebido(f))} de ${money(f.total)}</span></div><div class="list">${f.pagamentos.map((p) => `<div class="li"><div class="grow"><div class="t">${esc(p.forma)}${p.parcelas > 1 ? ` em ${p.parcelas}x de ${money(p.valor / p.parcelas)}` : ''}</div><div class="s">${date(p.data)}</div></div><b class="num">${money(p.valor)}</b></div>`).join('')}</div></div>` : ''}
     ${ajustesHTML(s, f)}
     ${acertosHTML(s, f)}
     ${f.obs ? `<div class="card mt" style="border-left:3px solid var(--dourado)"><div class="label">Observação do parceiro</div><div class="mt-s">${esc(f.obs)}</div></div>` : ''}
@@ -605,6 +653,15 @@ function vFechamento({ id }) {
       <div class="card pad-0"><div style="padding:16px 16px 0"><h2>Reposição ${f.status === 'enviado' ? 'solicitada' : 'enviada'}</h2></div>
         ${repo.length ? `<form id="frepo"><div class="list" style="padding:0 16px">${repo.map((r) => { const p = D.produto(s, r.produtoId); const novo = !f.itens.some((i) => i.produtoId === r.produtoId); return `<div class="li">${thumb(p, 'sm')}<div class="grow"><div class="t">${esc(p.nome)} ${novo ? badge('Novo rótulo', 'opp') : ''}</div><div class="s">Central: ${est[p.id]}${f.status === 'enviado' && est[p.id] < r.qtd ? ' · <span style="color:var(--crit)">insuficiente</span>' : ''}</div></div>${f.status === 'enviado' ? stepper('r:' + p.id, Math.min(r.qtd, Math.max(0, est[p.id])), { max: Math.max(0, est[p.id]) }) : `<b>${r.qtd}</b>`}</div>`; }).join('')}</div></form>` : `<div style="padding:16px">${empty('Sem reposição', 'truck')}</div>`}</div>
     </div>`, { back: true });
+}
+
+// Opções do seletor de forma: condições do parceiro + formas simples (valor "cond:<id>" para condições)
+function opcoesForma(c, f) {
+  const atual = f.condicao ? 'cond:' + f.condicao.id : f.formaPagamento;
+  const conds = [...(c.condicoes || [])];
+  if (f.condicao && !conds.some((x) => x.id === f.condicao.id)) conds.push(f.condicao);
+  return [...conds.map((x) => [`cond:${x.id}`, D.descCondicao(x)]), ...[...new Set([...c.formasPagamento, ...D.FORMAS_PAGAMENTO, ...(f.condicao ? [] : [f.formaPagamento])])].filter(Boolean).map((x) => [x, x + (c.formasPagamento.includes(x) ? '' : ' (fora do cadastro)')])]
+    .map(([v, n]) => `<option value="${esc(v)}" ${v === atual ? 'selected' : ''}>${esc(n)}</option>`).join('');
 }
 
 function vNovoFechamento({ cid }) {
@@ -691,8 +748,8 @@ function vFinanceiroPeriodo({ query }) {
       ${[['Faturamento', 'receita'], ['(−) Custo das mercadorias', 'cmv'], ['= Lucro bruto', null], ['(−) Despesas operacionais', 'despesas'], ['= Resultado', 'lucro'], ['Recebido no caixa', 'recebido']].map(([n, k]) => `<tr><td style="white-space:nowrap;${n.startsWith('=') ? 'font-weight:600' : ''}">${n}</td>${serie.map((m) => `<td class="r">${money0(k ? m[k] : m.receita - m.cmv)}</td>`).join('')}<td class="r"><b>${money0(k ? tot[k] : tot.receita - tot.cmv)}</b></td></tr>`).join('')}
     </tbody></table></div></div>
     <div class="grid g2 mt">
-      <div class="card pad-0"><div style="padding:16px 16px 0" class="row between"><h2>Contas a receber</h2><span class="small muted">${money(sum(cr, (x) => x.total))}</span></div>
-        <div class="list" style="padding:0 16px">${cr.map((f) => `<a class="li" href="#/fechamento/${f.id}"><div class="grow"><div class="t">${esc(D.cliente(s, f.clienteId).nome)}</div><div class="s">${esc(f.formaPagamento)} · vence ${date(f.vencimento)}</div></div><div class="right"><div class="num" style="font-weight:600">${money(f.total)}</div>${f.atraso ? badge(`${f.atraso}d atraso`, 'crit') : badge(relDays(f.vencimento), 'info')}</div></a>`).join('') || empty('Nada a receber', 'check')}</div></div>
+      <div class="card pad-0"><div style="padding:16px 16px 0" class="row between"><h2>Contas a receber</h2><span class="small muted">${money(sum(cr, (x) => x.saldo))}</span></div>
+        <div class="list" style="padding:0 16px">${cr.map((f) => `<a class="li" href="#/fechamento/${f.id}"><div class="grow"><div class="t">${esc(D.cliente(s, f.clienteId).nome)}</div><div class="s">${esc(f.formaPagamento)} · vence ${date(f.vencimento)}</div></div><div class="right"><div class="num" style="font-weight:600">${money(f.saldo)}</div>${f.atraso ? badge(`${f.atraso}d atraso`, 'crit') : badge(relDays(f.vencimento), 'info')}</div></a>`).join('') || empty('Nada a receber', 'check')}</div></div>
       <div class="card pad-0"><div style="padding:16px 16px 0"><h2>Últimas despesas</h2></div>
         <div class="list" style="padding:0 16px">${desp.map((d) => `<div class="li"><div class="grow"><div class="t">${esc(d.descricao)}</div><div class="s">${esc(d.categoria)} · ${date(d.data)}</div></div><div class="num">${money(d.valor)}</div><button class="iconbtn" data-act="delDesp" data-id="${d.id}" aria-label="Excluir">${icon('trash')}</button></div>`).join('')}</div></div>
     </div>`);
@@ -867,11 +924,12 @@ function vImprimirRomaneio({ cid, query }) {
   const agrupar = (pares) => Object.entries(pares.reduce((m, [pid, q]) => ((m[pid] = (m[pid] || 0) + q), m), {})).filter(([, q]) => q > 0);
   const itensRem = agrupar(remessa.map((m) => [m.produtoId, m.qtd]));
   const itensSaldo = agrupar(Object.entries(saldo));
-  const tot = (its) => ({ q: sum(its, ([, q]) => q), v: sum(its, ([pid, q]) => q * D.produto(s, pid).preco) });
+  const pr = (pid) => D.precoParceiro(s, c, pid);
+  const tot = (its) => ({ q: sum(its, ([, q]) => q), v: sum(its, ([pid, q]) => q * pr(pid)) });
   const tR = tot(itensRem), tS = tot(itensSaldo);
   const st = remessa[0]?.entrega && remessa[0].entrega !== 'entregue' ? remessa[0].entrega : null;
   const tabela = (its, t) => `<table class="tbl"><thead><tr><th>Rótulo</th><th class="r">Qtd.</th><th class="r">Preço un.</th><th class="r">Valor</th></tr></thead>
-    <tbody>${sortBy(its, ([pid]) => D.produto(s, pid).nome).map(([pid, q]) => { const p = D.produto(s, pid); return `<tr><td>${esc(p.nome)}</td><td class="r">${q}</td><td class="r">${money(p.preco)}</td><td class="r">${money(q * p.preco)}</td></tr>`; }).join('')}</tbody>
+    <tbody>${sortBy(its, ([pid]) => D.produto(s, pid).nome).map(([pid, q]) => { const p = D.produto(s, pid); return `<tr><td>${esc(p.nome)}</td><td class="r">${q}</td><td class="r">${money(pr(pid))}</td><td class="r">${money(q * pr(pid))}</td></tr>`; }).join('')}</tbody>
     <tfoot><tr><td>Total</td><td class="r">${t.q}</td><td></td><td class="r">${money(t.v)}</td></tr></tfoot></table>`;
   return shell('Romaneio', `${docHead('Romaneio de consignação', `${remessa[0]?.protocolo ? 'Protocolo ' + remessa[0].protocolo + ' · ' : ''}${esc(c.nome)}`)}
     <div class="resumo small">
@@ -996,7 +1054,7 @@ const common = {
       for (const g of c.garcons) g.ativo = nomes.includes(g.nome);
       for (const n of nomes) if (!c.garcons.some((g) => g.nome === n)) c.garcons.push({ id: uid('g'), nome: n, ativo: true });
       Object.assign(c, { nome: fd.get('nome'), tipo: fd.get('tipo'), cidade: fd.get('cidade'), regiao: fd.get('regiao'), contato: fd.get('contato'), telefone: fd.get('telefone'), email: fd.get('email'), cnpj: fd.get('cnpj'),
-        cicloDias: +fd.get('cicloDias') || 15, prazoDias: +fd.get('prazoDias') || 0, formasPagamento: formas, formaPadrao: formas.includes(c.formaPadrao) ? c.formaPadrao : formas[0],
+        cicloDias: +fd.get('cicloDias') || 15, prazoDias: +fd.get('prazoDias') || 0, formasPagamento: formas, formaPadrao: formas.includes(c.formaPadrao) || (c.formaPadrao?.startsWith('cond:') && D.condicao(c, c.formaPadrao.slice(5))) ? c.formaPadrao : formas[0],
         codigo: cod, pin: String(fd.get('pin')).slice(0, 4) });
       if (id) c.ativo = !!fd.get('ativo');
     });
@@ -1033,11 +1091,37 @@ const common = {
     const s = S();
     const f = s.fechamentos.find((x) => x.id === el.dataset.id);
     const c = D.cliente(s, f.clienteId);
-    modal({ title: 'Registrar pagamento', body: `<form id="fpag" class="col"><div class="kpi"><div class="label">${esc(c.nome)}</div><div class="v">${money(f.total)}</div></div>
+    const aberto = D.saldoAberto(f);
+    let linhas = f.condicao ? D.dividirCondicao(f.condicao, aberto) : [{ forma: f.formaPagamento || c.formaPadrao, valor: aberto, parcelas: 1 }];
+    const formas = [...new Set([...D.FORMAS_PAGAMENTO, ...c.formasPagamento, ...linhas.map((l) => l.forma)])];
+    const ler = () => { const fm = document.getElementById('fpag'); if (fm) linhas = linhas.map((_, i) => ({ forma: fm.elements['f' + i].value, valor: parseMoney(fm.elements['v' + i].value), parcelas: Math.max(1, +fm.elements['n' + i].value || 1) })); };
+    const falta = () => Math.round((aberto - sum(linhas, (l) => l.valor)) * 100) / 100;
+    const resumo = () => { const d = falta(); return d > 0 ? `<span style="color:var(--warn)">Faltam ${money(d)} — o restante continua em aberto (pagamento parcial).</span>` : d < 0 ? `<span style="color:var(--crit)">${money(-d)} acima do valor em aberto.</span>` : '<span style="color:var(--ok)">Valor fechado.</span>'; };
+    const corpo = () => `<form id="fpag" class="col"><div class="kpi"><div class="label">${esc(c.nome)}${f.pagamentos?.length ? ` · já recebido ${money(D.recebido(f))}` : ''}</div><div class="v">${money(aberto)}</div></div>
       <label class="field"><span>Data</span><input class="input" type="date" name="data" value="${today()}"></label>
-      <label class="field"><span>Forma</span><select class="input" name="forma">${[...new Set([...c.formasPagamento, ...D.FORMAS_PAGAMENTO])].map((x) => `<option ${x === f.formaPagamento ? 'selected' : ''}>${x}</option>`).join('')}</select></label></form>`,
+      <div class="label">Como foi pago</div>
+      ${linhas.map((l, i) => `<div class="row gap-s wrap"><select class="input" name="f${i}" style="flex:1;min-width:140px">${formas.map((x) => `<option ${x === l.forma ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select>
+        ${moneyInput('v' + i, l.valor, { width: 120 })}<label class="row gap-s small"><input class="input" name="n${i}" type="number" min="1" max="24" value="${l.parcelas}" style="width:60px" title="Parcelas">x</label>
+        ${linhas.length > 1 ? `<button type="button" class="iconbtn" data-act="tira" data-i="${i}" title="Remover">${icon('x')}</button>` : ''}</div>`).join('')}
+      <button type="button" class="btn ghost sm" data-act="poe" style="align-self:flex-start">${icon('plus')} Dividir em outra forma</button>
+      <div class="small" id="pag-resumo">${resumo()}</div></form>`;
+    const redesenhar = () => { const d = document.getElementById('fpag')?.elements.data.value; m.querySelector('.mb').innerHTML = corpo(); if (d) document.getElementById('fpag').elements.data.value = d; };
+    const m = modal({ title: 'Registrar pagamento', body: corpo(),
       foot: `<button class="btn ghost" data-act="close">Cancelar</button><button class="btn ok" data-act="ok">Confirmar recebimento</button>`,
-      handlers: { ok: () => { const fd = new FormData(document.getElementById('fpag')); store.commit((st) => D.registrarPagamento(st, f.id, { data: fd.get('data'), forma: fd.get('forma') }), 'pago'); closeModal(); toast('Pagamento registrado'); } } });
+      handlers: {
+        poe: () => { ler(); linhas.push({ forma: 'Cartão de crédito', valor: Math.max(0, falta()), parcelas: 1 }); redesenhar(); },
+        tira: (el) => { ler(); linhas.splice(+el.dataset.i, 1); redesenhar(); },
+        ok: () => {
+          ler();
+          if (falta() < 0) return toast('A soma passou do valor em aberto');
+          if (!sum(linhas, (l) => l.valor)) return toast('Informe o valor recebido');
+          const data = document.getElementById('fpag').elements.data.value || today();
+          const parcial = falta() > 0;
+          store.commit((st) => D.registrarPagamento(st, f.id, { data, partes: linhas }), 'pago');
+          closeModal(); toast(parcial ? `Recebimento parcial registrado · faltam ${money(D.saldoAberto(S().fechamentos.find((x) => x.id === f.id)))}` : 'Pagamento registrado');
+        },
+      } });
+    m.addEventListener('input', () => { ler(); const r = m.querySelector('#pag-resumo'); if (r) r.innerHTML = resumo(); });
   },
   despesa: () => modal({ title: 'Nova despesa', body: `<form id="fdesp" class="col"><label class="field"><span>Descrição</span><input class="input" name="descricao" required></label>
       <div class="grid g2"><label class="field"><span>Valor</span>${moneyInput('valor', 0)}</label><label class="field"><span>Data</span><input class="input" type="date" name="data" value="${today()}"></label></div>
@@ -1108,7 +1192,37 @@ const common = {
   recusarPedido: (el) => modal({ title: 'Recusar pedido', body: '<form id="frec"><label class="field"><span>Motivo (o parceiro verá)</span><input class="input" name="motivo" maxlength="200"></label></form>',
     foot: '<button class="btn ghost" data-act="close">Voltar</button><button class="btn" data-act="ok">Recusar</button>',
     handlers: { ok: () => { const m = new FormData(document.getElementById('frec')).get('motivo'); store.commit((st) => D.recusarPedido(st, el.dataset.id, m)); closeModal(); toast('Pedido recusado'); } } }),
-  formaFech: (el) => { const v = el.value.replace(' (fora do cadastro)', ''); store.commit((st) => { st.fechamentos.find((x) => x.id === el.dataset.id).formaPagamento = v; }); toast(`Forma de pagamento: ${v}`); },
+  formaFech: (el) => {
+    const v = el.value;
+    let nome = v;
+    store.commit((st) => {
+      const f = st.fechamentos.find((x) => x.id === el.dataset.id);
+      const cond = v.startsWith('cond:') ? (D.cliente(st, f.clienteId).condicoes || []).find((x) => x.id === v.slice(5)) || (f.condicao?.id === v.slice(5) ? f.condicao : null) : null;
+      if (cond) { f.condicao = cond; f.formaPagamento = nome = D.descCondicao(cond); } else { delete f.condicao; f.formaPagamento = v; }
+    });
+    toast(`Forma de pagamento: ${nome}`);
+  },
+  condNova: (el) => modalCondicao(el.dataset.c),
+  condDel: (el) => confirmar('Excluir esta condição de pagamento? Fechamentos já feitos com ela não mudam.', { ok: 'Excluir' }).then((y) => y && store.commit((st) => {
+    const c = D.cliente(st, el.dataset.c);
+    c.condicoes = (c.condicoes || []).filter((x) => x.id !== el.dataset.id);
+    if (c.formaPadrao === 'cond:' + el.dataset.id) c.formaPadrao = c.formasPagamento[0];
+  })),
+  condPadrao: (el) => { store.commit((st) => { D.cliente(st, el.dataset.c).formaPadrao = el.dataset.v; }); toast('Forma padrão atualizada'); },
+  salvarPrecos: (f) => {
+    const fd = new FormData(f);
+    store.commit((st) => {
+      const c = D.cliente(st, f.dataset.c);
+      const precos = {};
+      for (const [k, v] of fd) {
+        if (!k.startsWith('v:')) continue;
+        const pid = k.slice(2), valor = parseMoney(v), ate = fd.get('ate:' + pid) || '';
+        if (valor > 0) precos[pid] = ate ? { valor, ate } : { valor };
+      }
+      c.precos = precos;
+    });
+    toast('Preços do parceiro salvos');
+  },
   avancarRem: (el) => {
     const st = el.dataset.st;
     if (st === 'entregue') return modal({ title: 'Confirmar entrega', body: `<form id="fent" class="col"><label class="field"><span>Data da entrega</span><input class="input" type="date" name="data" value="${today()}"></label><label class="field"><span>Recebido por</span><input class="input" name="quem" placeholder="Nome de quem recebeu"></label></form>`,

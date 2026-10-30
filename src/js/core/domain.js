@@ -39,6 +39,35 @@ export const cliente = (s, id) => s.clientes.find((c) => c.id === id);
 export const garcom = (c, id) => c?.garcons.find((g) => g.id === id);
 export const precoCarta = (s, c, pid) => c.precosCarta?.[pid] ?? produto(s, pid)?.precoCarta ?? 0;
 
+// Preço especial por parceiro (promoção): c.precos[pid] = { valor, ate? }. Sem preço especial
+// válido na data, vale o preço de tabela do rótulo.
+export function promocao(s, c, pid, data = today()) {
+  const cl = typeof c === 'string' ? cliente(s, c) : c;
+  const x = cl?.precos?.[pid];
+  return x && x.valor > 0 && (!x.ate || data <= x.ate) ? x : null;
+}
+export const precoParceiro = (s, c, pid, data = today()) => promocao(s, c, pid, data)?.valor ?? produto(s, pid)?.preco ?? 0;
+export const valorConsignado = (s, c, saldo) => sum(Object.entries(saldo), ([pid, q]) => q * precoParceiro(s, c, pid));
+
+// Condições de pagamento por parceiro: c.condicoes = [{ id, partes: [{ forma, pct, parcelas }] }]
+// (ex.: 40% Dinheiro + 60% Cartão de crédito em 3x). A última parte fica com o restante.
+export function descCondicao(cond) {
+  const ps = cond?.partes || [];
+  if (ps.length === 1) return ps[0].forma + (ps[0].parcelas > 1 ? ` em ${ps[0].parcelas}x` : '');
+  return ps.map((p, i) => `${i === ps.length - 1 ? 'restante' : `${+p.pct || 0}%`} ${p.forma}${p.parcelas > 1 ? ` em ${p.parcelas}x` : ''}`).join(' + ');
+}
+// Divide um valor conforme a condição (centavos exatos; a última parte leva a diferença)
+export function dividirCondicao(cond, total) {
+  const ps = cond?.partes || [];
+  let resto = Math.round(total * 100);
+  return ps.map((p, i) => {
+    const v = i === ps.length - 1 ? resto : Math.min(resto, Math.round(total * (+p.pct || 0)));
+    resto -= v;
+    return { forma: p.forma, valor: v / 100, parcelas: +p.parcelas || 1 };
+  });
+}
+export const condicao = (c, id) => (c?.condicoes || []).find((x) => x.id === id);
+
 // ---------- Estoque ----------
 
 export function estoqueCentral(s) {
@@ -74,7 +103,7 @@ export function remessas(s) {
     const r = (g[m.remessaId] ||= { id: m.remessaId, protocolo: m.protocolo || '', clienteId: m.clienteId, data: m.data, status: m.entrega || 'entregue', itens: [], ref: m.ref, obs: m.obs, hist: m.entregaHist || [], entregueEm: m.entregueEm, recebidoPor: m.recebidoPor });
     r.itens.push({ produtoId: m.produtoId, qtd: m.qtd, movId: m.id });
   }
-  return Object.values(g).map((r) => ({ ...r, garrafas: sum(r.itens, (i) => i.qtd), valor: valorItens(s, r.itens) })).sort((a, b) => (a.data + a.id < b.data + b.id ? 1 : -1));
+  return Object.values(g).map((r) => ({ ...r, garrafas: sum(r.itens, (i) => i.qtd), valor: valorItens(s, r.itens, r.clienteId) })).sort((a, b) => (a.data + a.id < b.data + b.id ? 1 : -1));
 }
 
 // Protocolo sequencial por ano: REM-2026-0001 (gerado pela Gestão, que enxerga todas as remessas)
@@ -186,7 +215,7 @@ export function lotes(s, cid, { simular } = {}) {
   return ls.map((l) => {
     let restante = 0, pendente = 0, agora = 0, valorPendente = 0, enviado = 0;
     for (const [pid, x] of Object.entries(l.itens)) {
-      const pr = produto(s, pid)?.preco || 0;
+      const pr = precoParceiro(s, c, pid);
       enviado += x.enviado; restante += x.enviado - x.vendido - x.baixa - x.agora; pendente += x.vendido - x.acertado; agora += x.agora;
       valorPendente += (x.vendido - x.acertado + x.agora) * pr;
     }
@@ -223,7 +252,7 @@ export function emTransito(s) {
 // ---------- Pedidos de reposição (parceiro, entre fechamentos) ----------
 export const STATUS_PEDIDO = { solicitado: { label: 'Solicitado', tone: 'warn' }, aprovado: { label: 'Aprovado', tone: 'ok' }, recusado: { label: 'Recusado', tone: 'crit' } };
 export const pedidos = (s) => s.pedidos || [];
-export const valorItens = (s, itens) => sum(itens, (i) => i.qtd * (produto(s, i.produtoId)?.preco || 0));
+export const valorItens = (s, itens, c) => sum(itens, (i) => i.qtd * (c ? precoParceiro(s, c, i.produtoId) : produto(s, i.produtoId)?.preco || 0));
 
 // Disponível para pedir = estoque central − pedidos e reposições aguardando aprovação.
 // No app do parceiro (nuvem) o número vem pronto do servidor (s.disponivelRemoto).
@@ -319,7 +348,7 @@ export function sugestaoReposicao(s, cid, contagem) {
   return out;
 }
 
-export function montarFechamento(s, cid, { contagem, reposicao = {}, forma, obs = '', criadoPor = 'cliente', data = today(), esperado = {}, justificativas = {}, lotesSel }) {
+export function montarFechamento(s, cid, { contagem, reposicao = {}, forma, condicaoId, obs = '', criadoPor = 'cliente', data = today(), esperado = {}, justificativas = {}, lotesSel }) {
   const c = cliente(s, cid);
   const per = periodoAtual(s, cid);
   const saldo = saldoCliente(s, cid);
@@ -330,7 +359,7 @@ export function montarFechamento(s, cid, { contagem, reposicao = {}, forma, obs 
       const saldoAnterior = saldo[pid] || 0;
       const cont = Math.min(saldoAnterior, Math.max(0, contagem[pid] ?? saldoAnterior));
       const vendido = saldoAnterior - cont;
-      const preco = produto(s, pid).preco;
+      const preco = precoParceiro(s, c, pid, data);
       const item = {
         produtoId: pid, saldoAnterior, contagem: cont, vendido, preco, valor: vendido * preco,
         registrado: sum(registradas.filter((v) => v.produtoId === pid), (v) => v.qtd),
@@ -350,17 +379,18 @@ export function montarFechamento(s, cid, { contagem, reposicao = {}, forma, obs 
     if (!sel.has(l.id)) continue;
     for (const [pid, x] of Object.entries(l.itens)) {
       const q = x.vendido - x.acertado + x.agora;
-      if (q > 0) { const pr = produto(s, pid).preco; acertos.push({ loteId: l.id, protocolo: l.protocolo, produtoId: pid, qtd: q, preco: pr, valor: q * pr }); }
+      if (q > 0) { const pr = precoParceiro(s, c, pid, data); acertos.push({ loteId: l.id, protocolo: l.protocolo, produtoId: pid, qtd: q, preco: pr, valor: q * pr }); }
     }
   }
   const naoAcertado = sum(ls.filter((l) => !sel.has(l.id)), (l) => l.aAcertar);
+  const cond = condicao(c, condicaoId ?? (!forma && c.formaPadrao?.startsWith('cond:') ? c.formaPadrao.slice(5) : null));
   return {
     id: uid('fc'), numero: `FEC-${c.codigo}-${String(s.fechamentos.filter((f) => f.clienteId === cid).length + 1).padStart(3, '0')}`,
     clienteId: cid, inicio: per.inicio, fim: data, status: 'enviado', criadoPor,
     itens, acertos, lotesSel: [...sel].filter((id) => ls.some((l) => l.id === id)), naoAcertado,
     vendidas: sum(itens, (i) => i.vendido), total: sum(acertos, (a) => a.valor), garrafas: sum(acertos, (a) => a.qtd),
     reposicao: Object.entries(reposicao).filter(([, q]) => q > 0).map(([produtoId, qtd]) => ({ produtoId, qtd })),
-    formaPagamento: forma || c.formaPadrao, obs, enviadoEm: data, ts: Date.now(),
+    formaPagamento: cond ? descCondicao(cond) : forma || c.formaPadrao, ...(cond ? { condicao: cond } : {}), obs, enviadoEm: data, ts: Date.now(),
     ajustes: itens.filter((i) => i.esperado !== undefined && i.contagem !== i.esperado).length,
   };
 }
@@ -396,16 +426,26 @@ export function aprovarFechamento(s, id, { data = today(), reposicao } = {}) {
   return avisos;
 }
 
-export function registrarPagamento(s, id, { data = today(), forma } = {}) {
+// Recebimento de um fechamento: pode ser dividido em várias formas (dinheiro + cartão em 3x…)
+// e pode ser parcial — o fechamento só fica "pago" quando o recebido cobre o total.
+export const recebido = (f) => (f.pagamentos ? sum(f.pagamentos, (p) => p.valor) : f.status === 'pago' ? f.total : 0);
+export const saldoAberto = (f) => Math.max(0, Math.round((f.total - recebido(f)) * 100) / 100);
+export function registrarPagamento(s, id, { data = today(), forma, partes } = {}) {
   const f = s.fechamentos.find((x) => x.id === id);
+  partes ||= [{ forma: forma || f.formaPagamento, valor: saldoAberto(f), parcelas: 1 }];
+  f.pagamentos = [...(f.pagamentos || []), ...partes.filter((p) => p.valor > 0).map((p) => ({ data, forma: p.forma, valor: p.valor, parcelas: +p.parcelas || 1 }))];
+  if (saldoAberto(f) > 0) return;
   f.status = 'pago';
   f.pagoEm = data;
-  if (forma) f.formaPagamento = forma;
+  if (partes.length > 1 || f.pagamentos.length > 1) f.formaPagamento = [...new Set(f.pagamentos.map((p) => p.forma + (p.parcelas > 1 ? ` ${p.parcelas}x` : '')))].join(' + ');
+  else if (partes[0]?.forma) f.formaPagamento = partes[0].forma + (partes[0].parcelas > 1 ? ` em ${partes[0].parcelas}x` : '');
 }
+// Lançamentos de caixa de um fechamento (antigos, sem detalhamento, entram inteiros na data do pagamento)
+const recebimentosDe = (f) => f.pagamentos || (f.status === 'pago' && f.pagoEm ? [{ data: f.pagoEm, forma: f.formaPagamento, valor: f.total }] : []);
 
 export function registrarVenda(s, { clienteId, produtoId, qtd = 1, garcomId, data = today(), hora }) {
   const c = cliente(s, clienteId);
-  const v = { id: uid('vd'), ts: Date.now(), data, hora, clienteId, produtoId, qtd, garcomId, precoCarta: precoCarta(s, c, produtoId), preco: produto(s, produtoId).preco };
+  const v = { id: uid('vd'), ts: Date.now(), data, hora, clienteId, produtoId, qtd, garcomId, precoCarta: precoCarta(s, c, produtoId), preco: precoParceiro(s, c, produtoId, data) };
   s.vendas.push(v);
   return v;
 }
@@ -441,7 +481,7 @@ export function resumoVendas(s, cid, de, ate) {
 export function contasReceber(s) {
   const t = today();
   return s.fechamentos.filter((f) => f.status === 'aprovado')
-    .map((f) => ({ ...f, atraso: Math.max(0, diffDays(t, f.vencimento)) }))
+    .map((f) => ({ ...f, saldo: saldoAberto(f), atraso: Math.max(0, diffDays(t, f.vencimento)) }))
     .sort((a, b) => (a.vencimento < b.vencimento ? -1 : 1));
 }
 
@@ -477,7 +517,7 @@ export function serieMensal(s, meses = 6) {
     b.receita += v.receita; b.cmv += v.cmv; b.garrafas += v.qtd;
   }
   for (const d of s.despesas) { const b = base[monthKey(d.data)]; if (b && d.categoria !== 'Compra de mercadoria') b.despesas += d.valor; }
-  for (const f of s.fechamentos) { if (f.status === 'pago' && f.pagoEm <= t) { const b = base[monthKey(f.pagoEm)]; if (b) b.recebido += f.total; } }
+  for (const f of s.fechamentos) for (const p of recebimentosDe(f)) { if (p.data <= t) { const b = base[monthKey(p.data)]; if (b) b.recebido += p.valor; } }
   for (const m of s.movs) if (m.tipo === 'venda_direta') { const b = base[monthKey(m.data)]; if (b) b.recebido += m.qtd * m.precoUnit; }
   return keys.map((k) => ({ ...base[k], lucro: base[k].receita - base[k].cmv - base[k].despesas }));
 }
@@ -487,7 +527,7 @@ export function balancoMes(s, mes) {
   const vendas = vendasRealizadas(s).filter((v) => v.data.startsWith(mes));
   const despesas = s.despesas.filter((d) => d.data.startsWith(mes));
   const recebimentos = [
-    ...s.fechamentos.filter((f) => f.status === 'pago' && (f.pagoEm || '').startsWith(mes)).map((f) => ({ data: f.pagoEm, descricao: `Fechamento ${cliente(s, f.clienteId)?.nome || ''}`, forma: f.formaPagamento, valor: f.total, link: `#/fechamento/${f.id}` })),
+    ...s.fechamentos.flatMap((f) => recebimentosDe(f).filter((p) => (p.data || '').startsWith(mes)).map((p) => ({ data: p.data, descricao: `Fechamento ${cliente(s, f.clienteId)?.nome || ''}`, forma: p.forma + (p.parcelas > 1 ? ` em ${p.parcelas}x` : ''), valor: p.valor, link: `#/fechamento/${f.id}` }))),
     ...s.movs.filter((m) => m.tipo === 'venda_direta' && m.data.startsWith(mes)).map((m) => ({ data: m.data, descricao: `Venda direta · ${m.qtd}× ${produto(s, m.produtoId)?.nome}`, forma: '', valor: m.qtd * (m.precoUnit || 0) })),
   ].sort((a, b) => (a.data < b.data ? -1 : 1));
   const receita = sum(vendas, (v) => v.receita), cmv = sum(vendas, (v) => v.cmv);
@@ -501,7 +541,7 @@ export function balancoMes(s, mes) {
   return { mes, receita, cmv, lucroBruto: receita - cmv, operacionais, compras, resultado: receita - cmv - operacionais,
     recebido, pago: compras + operacionais, saldoCaixa: recebido - compras - operacionais, garrafas: sum(vendas, (v) => v.qtd),
     despesas: [...despesas].sort((a, b) => (a.data < b.data ? -1 : 1)), recebimentos, porParceiro, porCategoria,
-    aReceber: sum(contasReceber(s).filter((f) => (f.vencimento || '').startsWith(mes)), (f) => f.total) };
+    aReceber: sum(contasReceber(s).filter((f) => (f.vencimento || '').startsWith(mes)), (f) => f.saldo) };
 }
 
 // Vendas registradas por todos os parceiros num intervalo (acompanhamento em tempo real)
@@ -560,7 +600,7 @@ export function rankingClientes(s, janela = 90) {
     const receita = sum(fs, (f) => f.total);
     const garrafas = sum(fs, (f) => f.garrafas);
     const saldo = cons[c.id] || {};
-    const emConsig = sum(Object.entries(saldo), ([pid, q]) => q * produto(s, pid).preco);
+    const emConsig = valorConsignado(s, c, saldo);
     const garrafasConsig = sum(Object.values(saldo));
     return { cliente: c, receita, garrafas, emConsig, garrafasConsig, giro: garrafasConsig ? garrafas / garrafasConsig : 0 };
   }).sort((a, b) => b.receita - a.receita);
@@ -594,11 +634,11 @@ export function insights(s) {
     out.push({ nivel: 'acao', icone: 'inbox', titulo: `${c.nome} enviou o fechamento`, texto: `${f.garrafas} garrafas vendidas${f.ajustes ? ` · ${f.ajustes} ajuste(s) de contagem justificado(s)` : ''} · aguardando sua conferência`, link: `#/fechamento/${f.id}` });
   }
   for (const p of pedidos(s).filter((x) => x.status === 'solicitado')) {
-    out.push({ nivel: 'acao', icone: 'truck', titulo: `${cliente(s, p.clienteId)?.nome} pediu reposição`, texto: `${sum(p.itens, (i) => i.qtd)} garrafas · ${p.itens.map((i) => produto(s, i.produtoId)?.nome).join(', ')}`, link: '#/remessas', valor: valorItens(s, p.itens) });
+    out.push({ nivel: 'acao', icone: 'truck', titulo: `${cliente(s, p.clienteId)?.nome} pediu reposição`, texto: `${sum(p.itens, (i) => i.qtd)} garrafas · ${p.itens.map((i) => produto(s, i.produtoId)?.nome).join(', ')}`, link: '#/remessas', valor: valorItens(s, p.itens, p.clienteId) });
   }
   for (const r of contasReceber(s).filter((x) => x.atraso > 0)) {
     const c = cliente(s, r.clienteId);
-    out.push({ nivel: 'critico', icone: 'alert', titulo: `Pagamento atrasado: ${c.nome}`, texto: `Venceu há ${r.atraso} dias`, link: `#/fechamento/${r.id}`, valor: r.total });
+    out.push({ nivel: 'critico', icone: 'alert', titulo: `Pagamento atrasado: ${c.nome}`, texto: `Venceu há ${r.atraso} dias`, link: `#/fechamento/${r.id}`, valor: r.saldo });
   }
   for (const x of coberturaCentral(s)) {
     if (x.dias < 45 && x.produto.ativo) out.push({ nivel: x.dias < 20 ? 'critico' : 'atencao', icone: 'box', titulo: x.estoque <= 0 ? `${x.produto.nome}: esgotado no estoque central` : `${x.produto.nome}: estoque para ~${Math.floor(x.dias)} dias`, texto: `${x.estoque} garrafas no estoque central, giro de ${(x.giro * 30).toFixed(0)}/mês. Programe nova importação.`, link: `#/estoque` });

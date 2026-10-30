@@ -48,7 +48,7 @@ export function renderWizard(s, w, { modo = 'cliente' } = {}) {
       const vend = (saldo[pid] || 0) - w.contagem[pid];
       return `<div class="li">${thumb(p, 'sm')}<div class="grow"><div class="t">${esc(p.nome)}</div>
         <div class="s">Saldo ${saldo[pid]} · lançadas ${reg} · esperado <b>${esperado}</b></div>
-        <div class="s" style="color:var(--bordo)">Vendidas: <b>${vend}</b> · ${money(vend * p.preco)}${dif > 0 ? ` · <span style="color:var(--warn)">${dif} sem lançamento</span>` : dif < 0 ? ` · <span style="color:var(--crit)">${-dif} a mais que o esperado</span>` : ''}</div></div>
+        <div class="s" style="color:var(--bordo)">Vendidas: <b>${vend}</b> · ${money(vend * D.precoParceiro(s, c, pid))}${dif > 0 ? ` · <span style="color:var(--warn)">${dif} sem lançamento</span>` : dif < 0 ? ` · <span style="color:var(--crit)">${-dif} a mais que o esperado</span>` : ''}</div></div>
         ${dif !== 0 ? `<input class="input just ${falta ? 'falta' : ''}" name="just:${pid}" data-onchange="just" maxlength="200" placeholder="Motivo da diferença de ${Math.abs(dif)} (${dif > 0 ? 'faltam' : 'sobram'} garrafas) — obrigatório" value="${esc(w.just[pid] || '')}">` : ''}</div>
         ${stepper('cont:' + pid, w.contagem[pid], { max: saldo[pid] || 0 })}</div>`;
     }).join('')}</div></div>`;
@@ -86,13 +86,17 @@ export function renderWizard(s, w, { modo = 'cliente' } = {}) {
       return line(p, `Ficará com ${w.contagem[pid] || 0} · vende ~${(x.rate * c.cicloDias).toFixed(1).replace('.', ',')} por quinzena · ideal ${x.alvo}`);
     }).join('')}</div></div>
     <h3 class="mt">Incluir novo rótulo</h3>
-    <div class="card pad-0 mt-s"><div class="list" style="padding:0 14px">${novos.map((p) => line(p, `${w.recs.includes(p.id) ? '<span class="badge opp">Sugestão para você</span> ' : ''}${p.tipo} · ${esc(p.regiao)} · ${money(p.preco)}`)).join('')}</div></div>`;
+    <div class="card pad-0 mt-s"><div class="list" style="padding:0 14px">${novos.map((p) => line(p, `${w.recs.includes(p.id) ? '<span class="badge opp">Sugestão para você</span> ' : ''}${p.tipo} · ${esc(p.regiao)} · ${money(D.precoParceiro(s, c, p.id))}${D.promocao(s, c, p.id) ? ' <span class="badge ok">preço especial</span>' : ''}`)).join('')}</div></div>`;
   }
   if (w.step === 4) {
     const repoTot = sum(Object.values(w.repo || {}));
     const venc = addDays(today(), c.prazoDias);
-    body = `<div class="card"><div class="label mb">Forma de pagamento</div><div class="chips">${c.formasPagamento.map((f) => `<button type="button" class="chip ${w.forma === f ? 'on' : ''}" data-act="forma" data-v="${f}">${f}</button>`).join('')}</div>
-      <div class="tiny muted mt-s">Formas liberadas no seu cadastro. Vencimento previsto: ${date(venc)} (${c.prazoDias} dias após a conferência).</div></div>
+    const opcoes = [...(c.condicoes || []).map((x) => ['cond:' + x.id, D.descCondicao(x)]), ...c.formasPagamento.map((f) => [f, f])];
+    const escolhida = opcoes.find(([v]) => v === w.forma);
+    const parts = w.forma?.startsWith('cond:') ? D.dividirCondicao(D.condicao(c, w.forma.slice(5)), t.valor) : [];
+    body = `<div class="card"><div class="label mb">Forma de pagamento</div><div class="chips">${opcoes.map(([v, n]) => `<button type="button" class="chip ${w.forma === v ? 'on' : ''}" data-act="forma" data-v="${esc(v)}">${esc(n)}</button>`).join('')}</div>
+      ${parts.length && escolhida ? `<div class="small ink2 mt-s">${parts.map((p) => `${money(p.valor)} em ${esc(p.forma)}${p.parcelas > 1 ? ` (${p.parcelas}x de ${money(p.valor / p.parcelas)})` : ''}`).join(' + ')}</div>` : ''}
+      <div class="tiny muted mt-s">Condições liberadas no seu cadastro. Vencimento previsto: ${date(venc)} (${c.prazoDias} dias após a conferência).</div></div>
       <div class="card mt"><div class="grid g3" style="gap:10px">
         <div><div class="label">Vendidas</div><div class="num" style="font-size:20px">${int(t.garrafas)}</div></div>
         <div><div class="label">Total</div><div class="num" style="font-size:20px">${money(t.valor)}</div></div>
@@ -145,7 +149,8 @@ export function wizardHandlers(w, rerender, commit, onDone, modo = 'cliente', to
   function finish(aprovar) {
     let f;
     commit((s) => {
-      f = D.montarFechamento(s, w.cid, { contagem: w.contagem, reposicao: w.repo || {}, forma: w.forma, obs: w.obs, criadoPor: modo, esperado: w.esperado, justificativas: w.just, lotesSel: w.lotesSel });
+      const cond = w.forma?.startsWith('cond:') ? w.forma.slice(5) : null;
+      f = D.montarFechamento(s, w.cid, { contagem: w.contagem, reposicao: w.repo || {}, forma: cond ? null : w.forma, condicaoId: cond, obs: w.obs, criadoPor: modo, esperado: w.esperado, justificativas: w.just, lotesSel: w.lotesSel });
       D.enviarFechamento(s, f);
       const cl = D.cliente(s, w.cid);
       if (cl.filaPedido) { const fila = { ...cl.filaPedido }; for (const r of f.reposicao) delete fila[r.produtoId]; cl.filaPedido = fila; }
