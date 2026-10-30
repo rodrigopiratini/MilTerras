@@ -197,13 +197,26 @@ let deferredPrompt = null;
 window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); deferredPrompt = e; document.querySelectorAll('[data-act="install"]').forEach((b) => b.classList.remove('hide')); });
 export function instalar() {
   if (deferredPrompt) { deferredPrompt.prompt(); deferredPrompt = null; return; }
+  const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
   modal({ title: 'Instalar no celular', body: `
     <div class="col small">
-      <div><b>iPhone (Safari):</b> toque em <b>Compartilhar</b> <span class="muted">(quadrado com seta)</span> › <b>Adicionar à Tela de Início</b>.</div>
-      <div><b>Android (Chrome):</b> menu <b>⋮</b> › <b>Instalar app</b> ou <b>Adicionar à tela inicial</b>.</div>
-      <div class="muted">O app abre em tela cheia, com ícone próprio, e funciona mesmo com internet instável.</div>
-    </div>` });
+      <div class="ajuste-box"><b>Abriu o link pelo WhatsApp, Instagram ou e-mail?</b> Esses apps abrem uma janela própria que <b>não permite instalar</b> (aparece “Não foi possível abrir o aplicativo”). Primeiro abra no navegador:
+        ${ios ? 'toque em <b>⋯</b> ou no ícone da bússola › <b>Abrir no Safari</b>.' : 'toque no menu <b>⋮</b> › <b>Abrir no Chrome</b>.'}</div>
+      ${ios ? `<div><b>iPhone (Safari):</b> toque em <b>Compartilhar</b> <span class="muted">(quadrado com seta)</span> › <b>Adicionar à Tela de Início</b> › Adicionar.</div>`
+        : `<div><b>Android (Chrome):</b> menu <b>⋮</b> › <b>Instalar app</b> (ou <b>Adicionar à tela inicial</b> › Instalar).</div>`}
+      <div class="row gap-s"><button class="btn ghost sm" data-act="copiarLink">Copiar link</button><span class="tiny muted">Cole no Chrome/Safari se preferir.</span></div>
+      <div class="muted">Instalado, o app abre em tela cheia, com ícone próprio, e funciona mesmo com internet instável.</div>
+    </div>`, handlers: { copiarLink: () => { navigator.clipboard?.writeText(location.origin + location.pathname); toast('Link copiado'); } } });
 }
+export const instalado = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+export const ehCelular = () => matchMedia('(max-width: 900px)').matches && 'ontouchstart' in window;
+// Faixa “Instale o app” (celular, fora do app instalado, até a pessoa dispensar)
+export function bannerInstalar() {
+  let off = false; try { off = localStorage.getItem('mt-sem-banner-instalar') === '1'; } catch {}
+  if (off || instalado() || !ehCelular()) return '';
+  return `<div class="demo-banner">${icon('download')}<span class="grow">Instale o app na tela inicial para abrir mais rápido.</span><a href="#" data-act="install"><b>Como instalar</b></a><a href="#" data-act="semBanner" aria-label="Dispensar">${icon('x')}</a></div>`;
+}
+export function dispensarBanner() { try { localStorage.setItem('mt-sem-banner-instalar', '1'); } catch {} }
 
 export function registerSW() {
   if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register(ROOT + 'sw.js').catch(() => {});

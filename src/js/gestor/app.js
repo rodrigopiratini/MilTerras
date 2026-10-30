@@ -3,7 +3,7 @@ import * as store from '../core/store.js';
 import * as D from '../core/domain.js';
 import { seed } from '../core/seed.js';
 import { money, money0, moneyK, int, percent, date, dateShort, relDays, today, addDays, diffDays, monthLabel, esc, sum, uid, plural, sortBy } from '../core/fmt.js';
-import { icon, router, delegate, modal, closeModal, confirmar, toast, kpi, badge, empty, thumb, stepper, stepHandler, insightCard, fichaVinho, iniciais, qtdBadge, waLink, download, toCSV, asset, instalar, registerSW, moneyInput, parseMoney, filtrarBusca, buscaInput } from '../core/ui.js';
+import { icon, router, delegate, modal, closeModal, confirmar, toast, kpi, badge, empty, thumb, stepper, stepHandler, insightCard, fichaVinho, iniciais, qtdBadge, waLink, download, toCSV, asset, instalar, bannerInstalar, dispensarBanner, registerSW, moneyInput, parseMoney, filtrarBusca, buscaInput } from '../core/ui.js';
 import { chart, mountCharts, resetCharts, legend, hbars } from '../core/charts.js';
 import { novoWizard, renderWizard, wizardHandlers, statusBadge, ajustesHTML, acertosHTML } from '../core/fechamento-ui.js';
 
@@ -176,6 +176,7 @@ function vPainel() {
 
   return shell('Painel', `
     ${s.meta.demo ? `<div class="demo-banner">${icon('info')} <span class="grow">Catálogo e preços reais da Mil Terras. Parceiros e movimentações são <b>fictícios</b>, simulados para demonstrar os painéis.</span><a href="#/config">Começar do zero</a></div>` : ''}
+    ${bannerInstalar()}
     ${(() => { const h = D.resumoRede(s, today()); return `<a class="card row mb" href="#/aovivo" style="color:inherit;padding:12px 16px"><span class="live small" style="font-weight:600">Ao vivo</span><span class="grow small ink2">Hoje os parceiros já registraram <b>${plural(h.garrafas, 'garrafa')}</b> · ${money0(h.valor)} a faturar · ${h.porCliente.length} parceiro(s) vendendo</span>${icon('arrowR')}</a>`; })()}
     ${pageHead(`Olá, ${s.meta.empresa}`, new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' }), `<a class="btn ghost" href="#/consignacao?nova=1">${icon('truck')} Nova remessa</a><a class="btn" href="#/estoque?entrada=1">${icon('plus')} Entrada</a>`)}
     <div class="grid g4">
@@ -825,6 +826,7 @@ function vConfig() {
 
 function vMais() {
   return shell('Mais', `<div class="card pad-0"><div class="list" style="padding:0 16px">${NAV.map(([h, ic, n]) => `<a class="li" href="${h}"><span class="avatar">${icon(ic)}</span><div class="grow t">${n}</div>${icon('arrowR', 'muted')}</a>`).join('')}
+    <a class="li" href="#" data-act="install"><span class="avatar">${icon('download')}</span><div class="grow t">Instalar na tela inicial</div></a>
     <a class="li" href="#" data-act="logout"><span class="avatar">${icon('logout')}</span><div class="grow t">Sair</div></a></div></div>`);
 }
 
@@ -967,6 +969,7 @@ const common = {
   esqueci: () => modal({ title: 'Recuperar senha', body: '<form id="fes" class="col"><label class="field"><span>E-mail</span><input class="input" name="email" type="email" required></label></form>', foot: '<button class="btn" data-act="ok">Enviar link</button>',
     handlers: { ok: async () => { const email = new FormData(document.getElementById('fes')).get('email'); if (!email) return; await store.redefinirSenha(email); closeModal(); toast('Se o e-mail existir, você receberá um link.'); } } }),
   install: instalar,
+  semBanner: () => { dispensarBanner(); rerender(); },
   pin: (el) => { el.value = el.value.replace(/\D/g, ''); if (el.value) el.nextElementSibling?.focus(); const f = el.form; if ([...f.querySelectorAll('input')].every((i) => i.value)) f.requestSubmit(); },
   login: (f) => {
     const pin = [...f.querySelectorAll('input')].map((i) => i.value).join('');

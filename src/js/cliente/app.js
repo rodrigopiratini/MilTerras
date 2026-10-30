@@ -3,7 +3,7 @@ import * as store from '../core/store.js';
 import * as D from '../core/domain.js';
 import { HARMONIZA } from '../core/catalogo.js';
 import { money, money0, moneyK, int, percent, date, dateShort, relDays, today, addDays, diffDays, esc, sum, plural, sortBy } from '../core/fmt.js';
-import { icon, router, delegate, modal, closeModal, confirmar, toast, kpi, badge, empty, thumb, stepper, stepHandler, fichaVinho, iniciais, qtdBadge, waLink, download, toCSV, asset, instalar, registerSW, moneyInput, parseMoney } from '../core/ui.js';
+import { icon, router, delegate, modal, closeModal, confirmar, toast, kpi, badge, empty, thumb, stepper, stepHandler, fichaVinho, iniciais, qtdBadge, waLink, download, toCSV, asset, instalar, bannerInstalar, dispensarBanner, registerSW, moneyInput, parseMoney } from '../core/ui.js';
 import { chart, mountCharts, resetCharts, hbars, heatmap } from '../core/charts.js';
 import { novoWizard, renderWizard, wizardHandlers, statusBadge, ajustesHTML, acertosHTML } from '../core/fechamento-ui.js';
 
@@ -56,6 +56,7 @@ function vInicio() {
   const transito = D.remessas(s).filter((r) => r.clienteId === c.id && r.status !== 'entregue');
   const lotesAlerta = D.lotesAbertos(s, c.id).filter((l) => l.situacao === 'vencido' || l.situacao === 'vencendo');
   return shell('Início', `
+    ${bannerInstalar()}
     <div class="pagehead"><div><div class="label">${esc(c.cidade)}</div><h1 style="margin-top:4px">${esc(c.nome)}</h1></div><a class="btn hide-m" href="#/vender">${icon('plus')} Registrar venda</a></div>
     <div class="card dark">
       <div class="row between wrap"><div class="label">Período atual · desde ${date(per.desde)}</div>${per.pendente ? badge('Fechamento enviado', 'warn') : badge(dias < 0 ? `fechamento atrasado ${-dias}d` : dias === 0 ? 'fechamento hoje' : `fecha em ${dias} dias`, dias <= 0 ? 'crit' : '')}</div>
@@ -354,6 +355,7 @@ const common = {
   back: () => (history.length > 1 ? history.back() : (location.hash = '#/inicio')),
   print: () => window.print(),
   install: instalar,
+  semBanner: () => { dispensarBanner(); rerender(); },
   step: stepHandler,
   logout: async () => { localStorage.removeItem(SESSION); await store.sair(); go(); },
   login: async (f) => {
