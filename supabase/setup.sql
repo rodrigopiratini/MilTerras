@@ -120,7 +120,7 @@ create table if not exists public.instalacao (         -- sem políticas: ningu�
   codigo_setup text not null
 );
 insert into public.instalacao (id, codigo_setup)
-values (1, upper(encode(gen_random_bytes(4), 'hex')))
+values (1, upper(left(replace(gen_random_uuid()::text, '-', ''), 8)))
 on conflict (id) do nothing;
 
 -- ---------- Funções auxiliares ----------
@@ -280,7 +280,7 @@ end $$;
 
 create or replace function public.criar_convite(p_nome text) returns text
 language plpgsql security definer set search_path = public as $$
-declare v_codigo text := upper(encode(gen_random_bytes(5), 'hex'));
+declare v_codigo text := upper(left(replace(gen_random_uuid()::text, '-', ''), 10));
 begin
   if not public.eh_dono() then raise exception 'Somente o dono pode convidar gestores'; end if;
   insert into public.convites (codigo, nome, criado_por) values (v_codigo, nullif(trim(p_nome), ''), auth.uid());
