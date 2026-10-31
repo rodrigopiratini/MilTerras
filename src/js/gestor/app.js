@@ -3,7 +3,7 @@ import * as store from '../core/store.js';
 import * as D from '../core/domain.js';
 import { seed } from '../core/seed.js';
 import { money, money0, moneyK, int, percent, date, dateShort, relDays, today, addDays, diffDays, monthLabel, esc, sum, uid, plural, sortBy } from '../core/fmt.js';
-import { icon, router, delegate, modal, closeModal, confirmar, toast, kpi, badge, empty, thumb, stepper, stepHandler, insightCard, fichaVinho, iniciais, qtdBadge, waLink, download, toCSV, asset, instalar, bannerInstalar, dispensarBanner, registerSW, moneyInput, parseMoney, filtrarBusca, buscaInput } from '../core/ui.js';
+import { icon, router, delegate, modal, closeModal, confirmar, toast, kpi, badge, empty, thumb, stepper, stepHandler, insightCard, fichaVinho, iniciais, qtdBadge, waLink, download, toCSV, asset, instalar, bannerInstalar, dispensarBanner, registerSW, verificarAtualizacao, versaoApp, moneyInput, parseMoney, filtrarBusca, buscaInput } from '../core/ui.js';
 import { chart, mountCharts, resetCharts, legend, hbars } from '../core/charts.js';
 import { novoWizard, renderWizard, wizardHandlers, statusBadge, ajustesHTML, acertosHTML } from '../core/fechamento-ui.js';
 
@@ -887,6 +887,7 @@ function vConfig() {
 function vMais() {
   return shell('Mais', `<div class="card pad-0"><div class="list" style="padding:0 16px">${navItens().map(([h, ic, n]) => `<a class="li" href="${h}"><span class="avatar">${icon(ic)}</span><div class="grow t">${n}</div>${icon('arrowR', 'muted')}</a>`).join('')}
     <a class="li" href="#" data-act="install"><span class="avatar">${icon('download')}</span><div class="grow t">Instalar na tela inicial</div></a>
+    <a class="li" href="#" data-act="atualizarApp"><span class="avatar">${icon('refresh')}</span><div class="grow"><div class="t">Procurar atualização</div><div class="s">Versão ${versaoApp()}</div></div></a>
     <a class="li" href="#" data-act="logout"><span class="avatar">${icon('logout')}</span><div class="grow t">Sair</div></a></div></div>`);
 }
 
@@ -1186,6 +1187,7 @@ const common = {
   esqueci: () => modal({ title: 'Recuperar senha', body: '<form id="fes" class="col"><label class="field"><span>E-mail</span><input class="input" name="email" type="email" required></label></form>', foot: '<button class="btn" data-act="ok">Enviar link</button>',
     handlers: { ok: async () => { const email = new FormData(document.getElementById('fes')).get('email'); if (!email) return; await store.redefinirSenha(email); closeModal(); toast('Se o e-mail existir, você receberá um link.'); } } }),
   install: instalar,
+  atualizarApp: () => verificarAtualizacao(true),
   semBanner: () => { dispensarBanner(); rerender(); },
   pin: (el) => { el.value = el.value.replace(/\D/g, ''); if (el.value) el.nextElementSibling?.focus(); const f = el.form; if ([...f.querySelectorAll('input')].every((i) => i.value)) f.requestSubmit(); },
   login: (f) => {

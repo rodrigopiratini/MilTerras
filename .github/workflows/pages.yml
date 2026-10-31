@@ -28,6 +28,11 @@ jobs:
         run: |
           mkdir -p _site
           cp -r index.html gestor cliente src assets sw.js .nojekyll _site/
+          # versão desta publicação: o app compara com version.json e oferece o botão Atualizar
+          V="${GITHUB_SHA}"
+          echo "{\"v\":\"$V\",\"em\":\"$(date -u +%FT%TZ)\"}" > _site/version.json
+          echo "export const VERSAO = '$V';" > _site/src/js/versao.js
+          sed -i "s/const VERSION = '[^']*'/const VERSION = 'mt-${V:0:12}'/" _site/sw.js
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

@@ -1,5 +1,6 @@
 // Componentes de interface compartilhados pelos dois apps
 import { esc, money, int } from './fmt.js';
+import { VERSAO } from '../versao.js';
 
 export const ROOT = new URL('../../../', import.meta.url).href;
 export const asset = (p) => ROOT + p;
@@ -220,4 +221,49 @@ export function dispensarBanner() { try { localStorage.setItem('mt-sem-banner-in
 
 export function registerSW() {
   if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register(ROOT + 'sw.js').catch(() => {});
+  vigiarAtualizacoes();
+}
+
+// ---------- Atualização do app ----------
+// Cada publicação gera um version.json novo. O app compara com a versão que está rodando ao abrir,
+// ao voltar para a tela e a cada 5 minutos; se houver outra, mostra a barra com o botão Atualizar.
+export const versaoApp = () => (VERSAO === 'dev' ? 'desenvolvimento' : VERSAO.slice(0, 7));
+let versaoNova = null;
+async function versaoPublicada() {
+  const r = await fetch(ROOT + 'version.json?t=' + Date.now(), { cache: 'no-store' });
+  return r.ok ? (await r.json()).v : null;
+}
+export async function verificarAtualizacao(avisarSeIgual = false) {
+  if (VERSAO === 'dev' || location.protocol === 'file:') { if (avisarSeIgual) toast('Versão de desenvolvimento'); return false; }
+  try {
+    const v = await versaoPublicada();
+    if (v && v !== VERSAO) { versaoNova = v; barraAtualizar(); return true; }
+    if (avisarSeIgual) toast('Você já está na versão mais nova');
+  } catch { if (avisarSeIgual) toast('Sem conexão para verificar'); }
+  return false;
+}
+function barraAtualizar() {
+  if (document.getElementById('mt-atualizar')) return;
+  const el = document.createElement('div');
+  el.id = 'mt-atualizar';
+  el.className = 'atualizar-bar';
+  el.innerHTML = `${icon('refresh')}<span class="grow">Nova versão do app disponível</span><button class="btn sm">Atualizar</button>`;
+  el.querySelector('button').addEventListener('click', atualizarApp);
+  document.body.appendChild(el);
+}
+export async function atualizarApp() {
+  const b = document.querySelector('#mt-atualizar button');
+  if (b) { b.disabled = true; b.textContent = 'Atualizando…'; }
+  try {
+    const reg = await navigator.serviceWorker?.getRegistration(ROOT);
+    await reg?.update();
+    if (window.caches) for (const k of await caches.keys()) await caches.delete(k);
+  } catch {}
+  location.reload();
+}
+function vigiarAtualizacoes() {
+  if (VERSAO === 'dev') return;
+  verificarAtualizacao();
+  setInterval(verificarAtualizacao, 5 * 60000);
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') verificarAtualizacao(); });
 }

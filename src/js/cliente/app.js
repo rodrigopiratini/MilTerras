@@ -3,7 +3,7 @@ import * as store from '../core/store.js';
 import * as D from '../core/domain.js';
 import { HARMONIZA } from '../core/catalogo.js';
 import { money, money0, moneyK, int, percent, date, dateShort, relDays, today, addDays, diffDays, esc, sum, plural, sortBy } from '../core/fmt.js';
-import { icon, router, delegate, modal, closeModal, confirmar, toast, kpi, badge, empty, thumb, stepper, stepHandler, fichaVinho, iniciais, qtdBadge, waLink, download, toCSV, asset, instalar, bannerInstalar, dispensarBanner, registerSW, moneyInput, parseMoney } from '../core/ui.js';
+import { icon, router, delegate, modal, closeModal, confirmar, toast, kpi, badge, empty, thumb, stepper, stepHandler, fichaVinho, iniciais, qtdBadge, waLink, download, toCSV, asset, instalar, bannerInstalar, dispensarBanner, registerSW, verificarAtualizacao, versaoApp, moneyInput, parseMoney } from '../core/ui.js';
 import { chart, mountCharts, resetCharts, hbars, heatmap } from '../core/charts.js';
 import { novoWizard, renderWizard, wizardHandlers, statusBadge, ajustesHTML, acertosHTML } from '../core/fechamento-ui.js';
 
@@ -274,6 +274,7 @@ function vMais() {
     ${[['#/pedido', 'truck', 'Pedir reposição'], ['#/estoque', 'box', 'Meu estoque'], ['#/carta', 'wine', 'Carta e harmonização'], ['#/ajustes', 'gear', 'Equipe e preços da carta']].map(([h, ic, n]) => `<a class="li" href="${h}"><span class="avatar">${icon(ic)}</span><div class="grow t">${n}</div>${icon('arrowR')}</a>`).join('')}
     <a class="li" target="_blank" rel="noopener" href="${waLink(S().meta.whatsapp, `Olá, Mil Terras! Aqui é do ${c.nome}.`)}"><span class="avatar">${icon('whatsapp')}</span><div class="grow t">Falar com a Mil Terras</div></a>
     <a class="li" href="#" data-act="install"><span class="avatar">${icon('download')}</span><div class="grow t">Instalar na tela inicial</div></a>
+    <a class="li" href="#" data-act="atualizarApp"><span class="avatar">${icon('refresh')}</span><div class="grow"><div class="t">Procurar atualização</div><div class="s">Versão ${versaoApp()}</div></div></a>
     <a class="li" href="#" data-act="logout"><span class="avatar">${icon('logout')}</span><div class="grow t">Sair</div></a></div></div>`);
 }
 
@@ -359,6 +360,7 @@ const common = {
   back: () => (history.length > 1 ? history.back() : (location.hash = '#/inicio')),
   print: () => window.print(),
   install: instalar,
+  atualizarApp: () => verificarAtualizacao(true),
   semBanner: () => { dispensarBanner(); rerender(); },
   step: stepHandler,
   logout: async () => { localStorage.removeItem(SESSION); await store.sair(); go(); },
