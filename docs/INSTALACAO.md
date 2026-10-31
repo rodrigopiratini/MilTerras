@@ -53,3 +53,8 @@ Os rótulos (com preços e custos), as configurações e os acessos de gestão s
 Em Gestão › **Parceiros › (parceiro) › Pagamento e preços**:
 - **Condições de pagamento**: combine formas, ex.: 40% em dinheiro + restante no cartão em 3x. O parceiro escolhe a condição no fechamento; ao registrar o recebimento os valores já vêm divididos (dá para ajustar e também registrar pagamento parcial).
 - **Preços especiais**: valor cobrado só daquele parceiro no lugar do preço de tabela, com data final opcional para promoções.
+
+## Registro de atividades (o que cada pessoa fez)
+Gestão › **Mais › Atividade** (só o **dono** vê). Mostra, por dia e por pessoa, cada ação no sistema: remessas, entradas, fechamentos aprovados, pagamentos, preços e custos alterados, cadastros, vendas e pedidos dos parceiros, e cada vez que alguém entra no app. Toque numa pessoa para ver só o que ela fez.
+
+O registro é gravado pelo próprio banco, então vale para qualquer aparelho e não pode ser apagado pelos gestores. Guarda 1 ano. Para ativar numa instalação existente, rode de novo o `supabase/instalar.sql` (veja acima).

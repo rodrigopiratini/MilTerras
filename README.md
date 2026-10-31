@@ -47,4 +47,5 @@ sw.js                    funcionamento offline
 
 ## Dados e segurança
 - **Nuvem (produção):** Supabase/PostgreSQL. Cada registro é um documento JSON; Row Level Security garante que o parceiro só vê o próprio estabelecimento e nunca os custos. O gestor entra com e-mail e senha; parceiros com código + PIN (login anônimo vinculado por função segura, com bloqueio após 5 erros).
+- **Registro de atividades:** gatilhos no banco gravam quem fez cada alteração (e cada entrada nos apps) na tabela `atividade`; só o dono consulta, em Gestão › Atividade.
 - **Local (demonstração):** localStorage do navegador, com dados fictícios.

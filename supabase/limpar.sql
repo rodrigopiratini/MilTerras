@@ -19,6 +19,13 @@ delete from public.clientes;
 delete from public.tentativas_login;
 -- contas anônimas que os aparelhos dos parceiros usavam para entrar
 delete from auth.users u where u.is_anonymous and not exists (select 1 from public.perfis p where p.user_id = u.id);
+-- registro de atividades: troca as milhares de exclusões acima por uma única linha
+do $$ begin
+  if to_regclass('public.atividade') is not null then
+    delete from public.atividade where em = now() and acao = 'delete';
+    insert into public.atividade (quem, acao) values ('Sistema (painel do Supabase)', 'zerou');
+  end if;
+end $$;
 commit;
 
 select (select count(*) from public.produtos) as rotulos_mantidos,

@@ -329,6 +329,100 @@ revoke all on function public.estoque_disponivel() from public, anon;
 grant execute on function public.estoque_disponivel() to authenticated;
 grant execute on function public.meu_perfil() to authenticated;
 
+-- ---------- Registro de atividades (auditoria) ----------
+-- Toda gravação nas tabelas do app gera uma linha aqui, feita pelo próprio banco (gatilhos),
+-- com quem fez, o quê e o que mudou. Os apps também registram cada entrada no app.
+-- Somente o DONO consulta (função atividade_log); ninguém grava nem lê a tabela pela API.
+create table if not exists public.atividade (
+  id bigint generated always as identity primary key,
+  em timestamptz not null default now(),
+  user_id uuid,
+  papel text,                   -- dono | gestor | parceiro (no momento da ação)
+  quem text,                    -- e-mail do gestor ou nome do parceiro (no momento da ação)
+  cliente_id text,
+  acao text not null,           -- insert | update | delete | acesso
+  tabela text,
+  registro text,
+  antes jsonb,                  -- update: só os campos alterados; delete: o documento
+  depois jsonb                  -- update: só os campos alterados; insert: o documento
+);
+create index if not exists atividade_em_idx on public.atividade (em desc);
+create index if not exists atividade_user_idx on public.atividade (user_id, em desc);
+
+create or replace function public.atividade_autor(out o_papel text, out o_quem text, out o_cliente text)
+language plpgsql stable security definer set search_path = public as $$
+begin
+  if auth.uid() is null then o_quem := 'Sistema (painel do Supabase)'; return; end if;
+  select papel, cliente_id into o_papel, o_cliente from public.perfis where user_id = auth.uid();
+  if o_papel = 'parceiro' then o_quem := (select data->>'nome' from public.clientes where id = o_cliente);
+  else o_quem := (select email from auth.users where id = auth.uid()); end if;
+end $$;
+
+create or replace function public.registrar_atividade() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare
+  v_old jsonb; v_new jsonb; v_antes jsonb; v_depois jsonb; v_reg text; a record;
+begin
+  begin -- o registro nunca pode impedir a gravação do app
+    if tg_op <> 'INSERT' then v_old := case when tg_table_name in ('custos', 'perfis') then to_jsonb(old) else to_jsonb(old)->'data' end; end if;
+    if tg_op <> 'DELETE' then v_new := case when tg_table_name in ('custos', 'perfis') then to_jsonb(new) else to_jsonb(new)->'data' end; end if;
+    v_reg := coalesce(to_jsonb(new), to_jsonb(old))->>(case when tg_table_name = 'perfis' then 'user_id' else 'id' end);
+    if tg_op = 'UPDATE' then
+      select jsonb_object_agg(k, v_old->k), jsonb_object_agg(k, v_new->k) into v_antes, v_depois
+        from (select jsonb_object_keys(v_old || v_new) k) x where v_old->k is distinct from v_new->k;
+      if v_depois is null then return null; end if; -- nada mudou de fato
+    else v_antes := v_old; v_depois := v_new; end if;
+    select * into a from public.atividade_autor();
+    insert into public.atividade (user_id, papel, quem, cliente_id, acao, tabela, registro, antes, depois)
+    values (auth.uid(), a.o_papel, a.o_quem, a.o_cliente, lower(tg_op), tg_table_name, v_reg, v_antes, v_depois);
+  exception when others then raise warning 'registrar_atividade: %', sqlerrm;
+  end;
+  return null;
+end $$;
+
+do $$ declare t text; begin
+  foreach t in array array['config','produtos','custos','clientes','movs','vendas','fechamentos','pedidos','despesas','perfis'] loop
+    execute format('drop trigger if exists tg_atividade on public.%I', t);
+    execute format('create trigger tg_atividade after insert or update or delete on public.%I for each row execute function public.registrar_atividade()', t);
+  end loop;
+end $$;
+
+-- Chamada pelos apps ao entrar (no máximo um registro a cada 30 min por pessoa).
+-- Aproveita para apagar o que tiver mais de 1 ano.
+create or replace function public.registrar_acesso() returns void
+language plpgsql security definer set search_path = public as $$
+declare a record;
+begin
+  if auth.uid() is null then return; end if;
+  if exists (select 1 from public.atividade where user_id = auth.uid() and acao = 'acesso' and em > now() - interval '30 minutes') then return; end if;
+  select * into a from public.atividade_autor();
+  if a.o_papel is null then return; end if;
+  insert into public.atividade (user_id, papel, quem, cliente_id, acao) values (auth.uid(), a.o_papel, a.o_quem, a.o_cliente, 'acesso');
+  delete from public.atividade where em < now() - interval '1 year';
+end $$;
+
+-- Consulta do dono: página de registros (mais recentes primeiro) e resumo por pessoa (30 dias)
+create or replace function public.atividade_log(p_antes timestamptz default null, p_user uuid default null, p_desde timestamptz default null, p_limite int default 300) returns json
+language plpgsql stable security definer set search_path = public as $$
+begin
+  if not public.eh_dono() then raise exception 'Somente o dono vê o registro de atividades'; end if;
+  return json_build_object(
+    'itens', coalesce((select json_agg(x order by x.em desc, x.id desc) from (
+        select id, em, user_id "userId", papel, quem, cliente_id "clienteId", acao, tabela, registro, antes, depois
+          from public.atividade
+         where (p_antes is null or em < p_antes) and (p_user is null or user_id = p_user) and (p_desde is null or em >= p_desde)
+         order by em desc, id desc limit least(greatest(p_limite, 1), 1000)) x), '[]'::json),
+    'pessoas', coalesce((select json_agg(x order by x.ultimo desc) from (
+        select user_id "userId", (array_agg(papel order by em desc))[1] papel, (array_agg(quem order by em desc))[1] quem,
+               max(em) ultimo, count(*) filter (where acao <> 'acesso') acoes, count(*) filter (where acao = 'acesso') acessos
+          from public.atividade where em > now() - interval '30 days' and user_id is not null group by user_id) x), '[]'::json));
+end $$;
+
+revoke all on function public.atividade_autor() from public, anon, authenticated;
+revoke all on function public.registrar_acesso() from public, anon;
+revoke all on function public.atividade_log(timestamptz, uuid, timestamptz, int) from public, anon;
+grant execute on function public.registrar_acesso(), public.atividade_log(timestamptz, uuid, timestamptz, int) to authenticated;
+
 -- ---------- Row Level Security ----------
 alter table public.config enable row level security;
 alter table public.produtos enable row level security;
@@ -343,6 +437,7 @@ alter table public.perfis enable row level security;
 alter table public.tentativas_login enable row level security;
 alter table public.instalacao enable row level security;
 alter table public.convites enable row level security;
+alter table public.atividade enable row level security;
 
 do $$ declare r record; begin
   for r in select policyname, tablename from pg_policies where schemaname = 'public' and policyname like 'mt_%' loop
@@ -378,7 +473,7 @@ create policy mt_parceiro_ped_del  on public.pedidos     for delete to authentic
 create policy mt_proprio_perfil    on public.perfis      for select to authenticated using (user_id = auth.uid());
 
 grant select, insert, update, delete on public.config, public.produtos, public.custos, public.clientes, public.movs, public.vendas, public.fechamentos, public.pedidos, public.despesas, public.perfis to authenticated;
-revoke all on public.instalacao, public.tentativas_login, public.convites from anon, authenticated;
+revoke all on public.instalacao, public.tentativas_login, public.convites, public.atividade from anon, authenticated;
 
 -- ---------- Tempo real ----------
 do $$ declare t text; begin

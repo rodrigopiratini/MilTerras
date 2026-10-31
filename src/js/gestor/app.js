@@ -22,8 +22,11 @@ const NAV = [
   ['#/financeiro', 'money', 'Financeiro'],
   ['#/inteligencia', 'spark', 'Inteligência'],
   ['#/produtos', 'bottle', 'Rótulos'],
+  ['#/atividade', 'users', 'Atividade'],
   ['#/config', 'gear', 'Configurações'],
 ];
+// O registro de atividades é exclusivo do dono
+const navItens = () => NAV.filter(([h]) => h !== '#/atividade' || store.ehDono());
 const TABS = [['#/painel', 'chart', 'Painel'], ['#/estoque', 'box', 'Estoque'], ['#/fechamentos', 'receipt', 'Fechamentos'], ['#/parceiros', 'store', 'Parceiros'], ['#/mais', 'menu', 'Mais']];
 
 let current = { view: null, params: {}, pattern: '' };
@@ -40,7 +43,7 @@ function shell(title, content, { back } = {}) {
   return `<div class="shell">
     <aside class="side">
       <div class="brand"><img src="${asset('assets/logo/logo_h_negativo.png')}" alt="Mil Terras"><div class="who">Gestão</div></div>
-      ${NAV.map(([h, ic, n]) => `<a class="nav-a ${isOn(h) ? 'on' : ''}" href="${h}">${icon(ic)}<span>${n}</span>${b(h)}</a>`).join('')}
+      ${navItens().map(([h, ic, n]) => `<a class="nav-a ${isOn(h) ? 'on' : ''}" href="${h}">${icon(ic)}<span>${n}</span>${b(h)}</a>`).join('')}
       <div class="foot">${syncBadge()}<br><a href="#" data-act="logout" style="color:#C9B3AC">Sair</a></div>
     </aside>
     <div>
@@ -882,9 +885,164 @@ function vConfig() {
 }
 
 function vMais() {
-  return shell('Mais', `<div class="card pad-0"><div class="list" style="padding:0 16px">${NAV.map(([h, ic, n]) => `<a class="li" href="${h}"><span class="avatar">${icon(ic)}</span><div class="grow t">${n}</div>${icon('arrowR', 'muted')}</a>`).join('')}
+  return shell('Mais', `<div class="card pad-0"><div class="list" style="padding:0 16px">${navItens().map(([h, ic, n]) => `<a class="li" href="${h}"><span class="avatar">${icon(ic)}</span><div class="grow t">${n}</div>${icon('arrowR', 'muted')}</a>`).join('')}
     <a class="li" href="#" data-act="install"><span class="avatar">${icon('download')}</span><div class="grow t">Instalar na tela inicial</div></a>
     <a class="li" href="#" data-act="logout"><span class="avatar">${icon('logout')}</span><div class="grow t">Sair</div></a></div></div>`);
+}
+
+// ---------- Registro de atividades (somente o dono) ----------
+// Quem fez o quê: cada gravação no banco gera um registro (gatilhos no Supabase) e cada entrada no app também.
+const atv = { chave: null, dados: null, carregando: false, erro: null, mais: false };
+const PERIODOS_ATV = [['hoje', 'Hoje', 0], ['7d', '7 dias', 6], ['30d', '30 dias', 29], ['tudo', 'Tudo', null]];
+const PAPEL = { dono: 'Dono', gestor: 'Gestor', parceiro: 'Parceiro' };
+const CAMPOS = { nome: 'nome', codigo: 'código', pin: 'PIN', telefone: 'telefone', email: 'e-mail', contato: 'contato', cidade: 'cidade', cnpj: 'CNPJ', cicloDias: 'ciclo de acerto', prazoDias: 'prazo',
+  formasPagamento: 'formas de pagamento', formaPadrao: 'forma padrão', garcons: 'equipe', precosCarta: 'preços de carta', ativo: 'ativo', preco: 'preço', precoCarta: 'preço de carta', estoqueMin: 'estoque mínimo',
+  descricao: 'descrição', valor: 'valor', categoria: 'categoria', data: 'data', qtd: 'quantidade', obs: 'observação', status: 'status', itens: 'itens', vencimento: 'vencimento', formaPagamento: 'forma de pagamento',
+  empresa: 'nome da empresa', whatsapp: 'WhatsApp', instagram: 'Instagram', safra: 'safra', regiao: 'região', tipo: 'tipo' };
+const AUTOMATICOS = ['recomendados', 'filaPedido', 'ts', 'updatedAt']; // gravados pelo próprio app, não por uma ação da pessoa
+const camposMudados = (x) => Object.keys(x.depois || {}).filter((k) => !AUTOMATICOS.includes(k) && JSON.stringify(x.antes?.[k] ?? null) !== JSON.stringify(x.depois[k] ?? null));
+const listaCampos = (ks) => ks.map((k) => CAMPOS[k] || k).join(', ');
+const nomeCurto = (x) => x.papel === 'parceiro' ? x.quem || 'Parceiro' : (x.quem || '?').split('@')[0].replace(/^./, (c) => c.toUpperCase());
+const horaAtv = (em) => new Date(em).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+const diaAtv = (em) => { const d = new Date(em); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+
+function descreverAtividade(s, x) {
+  const d = x.depois || {}, a = x.antes || {}, doc = x.acao === 'delete' ? a : d;
+  const P = (id) => esc(D.produto(s, id)?.nome || id || '—');
+  const C = (id) => esc(D.cliente(s, id)?.nome || 'parceiro');
+  const atual = (lista) => (s[lista] || []).find((r) => r.id === x.registro) || {};
+  const ks = camposMudados(x);
+  if (x.acao === 'acesso') return 'entrou no app';
+  if (x.acao === 'zerou') return 'zerou a operação (parceiros, estoque, vendas, fechamentos e despesas apagados)';
+  switch (x.tabela) {
+    case 'movs': {
+      const m = { ...atual('movs'), ...doc };
+      const desc = `${(D.TIPOS_MOV[m.tipo]?.label || m.tipo || 'movimentação').toLowerCase()}: ${m.qtd} gf de ${P(m.produtoId)}${m.clienteId ? ' · ' + C(m.clienteId) : ''}${m.obs ? ` — “${esc(m.obs)}”` : ''}`;
+      if (x.acao === 'insert') return 'lançou ' + desc;
+      if (x.acao === 'delete') return 'excluiu ' + desc;
+      if (ks.includes('entrega')) return `marcou a remessa ${esc(m.protocolo || '')} de ${C(m.clienteId)} como <b>${esc(D.STATUS_ENTREGA[d.entrega]?.label || d.entrega)}</b>`;
+      return `alterou ${desc}${ks.length ? ' (' + listaCampos(ks) + ')' : ''}`;
+    }
+    case 'vendas': {
+      const v = { ...atual('vendas'), ...doc };
+      const g = D.garcom(D.cliente(s, v.clienteId), v.garcomId)?.nome;
+      const desc = `${v.qtd}× ${P(v.produtoId)}${g ? ' · garçom ' + esc(g) : ''}`;
+      return x.acao === 'insert' ? 'registrou venda: ' + desc : x.acao === 'delete' ? 'cancelou a venda: ' + desc : `alterou a venda: ${desc}`;
+    }
+    case 'fechamentos': {
+      const f = { ...atual('fechamentos'), ...doc };
+      const ref = `${f.numero ? esc(f.numero) + ' · ' : ''}${C(f.clienteId)}${f.total != null ? ' · ' + money(f.total) : ''}`;
+      if (x.acao === 'insert') return f.status === 'enviado' ? `enviou o fechamento ${ref}` : `criou o fechamento ${ref} (${esc(D.STATUS_FECH[f.status]?.label || f.status)})`;
+      if (x.acao === 'delete') return `excluiu o fechamento ${ref}`;
+      if (ks.includes('status')) return ({ aprovado: 'aprovou o fechamento', pago: 'registrou o pagamento do fechamento', enviado: 'reenviou o fechamento', rascunho: 'devolveu para rascunho o fechamento' }[d.status] || 'mudou o status do fechamento') + ' ' + ref;
+      return `alterou o fechamento ${ref}${ks.length ? ' (' + listaCampos(ks) + ')' : ''}`;
+    }
+    case 'pedidos': {
+      const p = { ...atual('pedidos'), ...doc };
+      const ref = `${plural(sum(p.itens || [], (i) => i.qtd), 'garrafa')} · ${C(p.clienteId)}`;
+      if (x.acao === 'insert') return `pediu reposição: ${ref}`;
+      if (x.acao === 'delete') return `cancelou o pedido de reposição: ${ref}`;
+      return ks.includes('status') ? `${{ aprovado: 'aprovou', recusado: 'recusou' }[d.status] || 'atualizou'} o pedido de reposição: ${ref}` : `alterou o pedido de reposição: ${ref}`;
+    }
+    case 'clientes': {
+      const nome = esc(doc.nome || D.cliente(s, x.registro)?.nome || 'parceiro');
+      if (x.acao === 'insert') return `cadastrou o parceiro <b>${nome}</b>`;
+      if (x.acao === 'delete') return `excluiu o parceiro <b>${nome}</b>`;
+      if (ks.includes('ativo')) return `${d.ativo ? 'reativou' : 'desativou'} o parceiro <b>${nome}</b>`;
+      if (ks.length === 1 && ks[0] === 'pin') return `trocou o PIN de <b>${nome}</b>`;
+      return ks.length ? `alterou o cadastro de <b>${nome}</b> (${listaCampos(ks)})` : '';
+    }
+    case 'produtos': {
+      const nome = esc(doc.nome || D.produto(s, x.registro)?.nome || x.registro);
+      if (x.acao === 'insert') return `cadastrou o rótulo <b>${nome}</b>`;
+      if (x.acao === 'delete') return `excluiu o rótulo <b>${nome}</b>`;
+      if (ks.includes('preco')) return `alterou o preço de <b>${nome}</b>: ${money(a.preco)} → ${money(d.preco)}${ks.length > 1 ? ' (e ' + listaCampos(ks.filter((k) => k !== 'preco')) + ')' : ''}`;
+      return ks.length ? `alterou o rótulo <b>${nome}</b> (${listaCampos(ks)})` : '';
+    }
+    case 'custos': return x.acao === 'update' ? `alterou o custo de <b>${P(x.registro)}</b>: ${money(a.custo)} → ${money(d.custo)}` : x.acao === 'insert' ? `definiu o custo de <b>${P(x.registro)}</b>: ${money(d.custo)}` : `removeu o custo de ${P(x.registro)}`;
+    case 'despesas': {
+      const dp = { ...atual('despesas'), ...doc };
+      const desc = `${esc(dp.descricao || dp.categoria || 'despesa')} · ${money(dp.valor)}`;
+      return x.acao === 'insert' ? `lançou a despesa ${desc}` : x.acao === 'delete' ? `excluiu a despesa ${desc}` : `alterou a despesa ${desc} (${listaCampos(ks)})`;
+    }
+    case 'config': return ks.length ? `alterou os dados da empresa (${listaCampos(ks)})` : '';
+    case 'perfis':
+      if (x.acao === 'insert') return doc.papel === 'parceiro' ? `conectou um aparelho ao app do parceiro ${C(doc.cliente_id)}` : `ativou um acesso de ${PAPEL[doc.papel]?.toLowerCase() || doc.papel}`;
+      if (x.acao === 'delete') return doc.papel === 'parceiro' ? `desconectou um aparelho do parceiro ${C(doc.cliente_id)}` : `removeu um acesso de ${PAPEL[doc.papel]?.toLowerCase() || doc.papel}`;
+      return 'alterou um acesso';
+  }
+  return `${{ insert: 'criou', update: 'alterou', delete: 'excluiu' }[x.acao] || x.acao} um registro em ${esc(x.tabela)}`;
+}
+
+async function carregarAtividade(query = {}, { forcar = false, mais = false } = {}) {
+  if (store.modo !== 'nuvem') return;
+  const chave = JSON.stringify([query.u || '', query.p || '7d']);
+  if (!forcar && !mais && atv.chave === chave && (atv.dados || atv.carregando)) return pintarAtividade();
+  if (atv.carregando) return;
+  atv.carregando = true; atv.erro = null;
+  if (!mais) { atv.chave = chave; atv.dados = null; pintarAtividade(); }
+  const dias = PERIODOS_ATV.find(([v]) => v === (query.p || '7d'))?.[2];
+  const desde = dias == null ? null : new Date(addDays(today(), -dias) + 'T00:00:00').toISOString();
+  const ult = mais ? atv.dados.itens[atv.dados.itens.length - 1]?.em : null;
+  try {
+    const r = await store.rpc('atividade_log', { p_antes: ult, p_user: query.u || null, p_desde: desde, p_limite: 300 });
+    if (mais) atv.dados.itens.push(...r.itens); else atv.dados = r;
+    atv.mais = r.itens.length === 300;
+  } catch (e) { atv.erro = e.message; }
+  atv.carregando = false;
+  if (current.pattern === '/atividade') pintarAtividade();
+}
+
+function pintarAtividade() {
+  const el = document.getElementById('atividade');
+  if (!el) return;
+  if (atv.erro) { el.innerHTML = `<div class="card small">Não foi possível carregar o registro: ${esc(atv.erro)}<br><span class="muted">Se for a primeira vez, rode novamente o <b>supabase/instalar.sql</b> no Supabase (SQL Editor) para criar o registro de atividades.</span></div>`; return; }
+  if (!atv.dados) { el.innerHTML = '<div class="card small muted">Carregando…</div>'; return; }
+  const s = S();
+  // ações seguidas da mesma pessoa, no mesmo tipo de registro, em poucos minutos viram uma linha só
+  const linhas = [];
+  for (const x of atv.dados.itens) {
+    const txt = descreverAtividade(s, x);
+    if (!txt) continue;
+    const ant = linhas[linhas.length - 1];
+    if (ant && ant.userId === x.userId && ant.tabela === x.tabela && ant.acao === x.acao && x.acao !== 'acesso' && diaAtv(ant.em) === diaAtv(x.em) && new Date(ant.ultimoEm) - new Date(x.em) < 3 * 60000) { ant.itens.push({ x, txt }); ant.ultimoEm = x.em; continue; }
+    linhas.push({ ...x, ultimoEm: x.em, itens: [{ x, txt }] });
+  }
+  atv.linhas = linhas;
+  const porDia = Object.entries(linhas.reduce((m, l) => ((m[diaAtv(l.em)] ||= []).push(l), m), {}));
+  const nomeDia = (d) => d === today() ? 'Hoje' : d === addDays(today(), -1) ? 'Ontem' : new Date(d + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' }).replace(/^./, (c) => c.toUpperCase());
+  el.innerHTML = porDia.length ? porDia.map(([dia, ls]) => `<div class="card pad-0 mt"><div style="padding:14px 16px 0"><h2>${nomeDia(dia)}</h2></div><div class="list" style="padding:0 16px">
+      ${ls.map((l) => `<div class="li" ${l.itens.length > 1 ? `data-act="atvGrupo" data-i="${linhas.indexOf(l)}" style="cursor:pointer"` : ''} data-busca="${esc((l.quem || '') + ' ' + l.itens.map((it) => it.txt.replace(/<[^>]+>/g, '')).join(' '))}">
+        <div class="avatar" title="${esc(l.quem || '')}">${l.acao === 'acesso' ? icon('logout') : esc(iniciais(nomeCurto(l)))}</div>
+        <div class="grow"><div class="t"><b>${esc(nomeCurto(l))}</b> ${l.itens[0].txt}${l.itens.length > 1 ? ` <span class="badge">+${l.itens.length - 1}</span>` : ''}</div>
+          <div class="s">${l.itens.length > 1 ? horaAtv(l.itens[l.itens.length - 1].x.em) + ' – ' : ''}${horaAtv(l.em)} · ${PAPEL[l.papel] || 'Sistema'}${l.papel !== 'parceiro' && l.quem?.includes('@') ? ' · ' + esc(l.quem) : ''}</div></div></div>`).join('')}</div></div>`).join('')
+    + (atv.mais ? `<div class="center mt"><button class="btn ghost" data-act="atvMais" ${atv.carregando ? 'disabled' : ''}>Carregar mais</button></div>` : '')
+    : `<div class="mt">${empty('Nenhuma atividade no período.', 'clock')}</div>`;
+  const pessoas = document.getElementById('atvPessoas');
+  if (pessoas) {
+    const q = current.params.query || {};
+    const link = (u) => `#/atividade?${new URLSearchParams({ ...(u ? { u } : {}), p: q.p || '7d' })}`;
+    pessoas.innerHTML = `<div class="chips"><a class="chip ${!q.u ? 'on' : ''}" href="${link('')}">Todos</a>${atv.dados.pessoas.map((p) => `<a class="chip ${q.u === p.userId ? 'on' : ''}" href="${link(p.userId)}" title="${esc(p.quem || '')}">${esc(nomeCurto(p))} <span class="${q.u === p.userId ? '' : 'muted'}">· ${PAPEL[p.papel] || ''}</span></a>`).join('')}</div>
+      <div class="list mt-s">${atv.dados.pessoas.filter((p) => p.papel !== 'parceiro').map((p) => `<div class="li"><div class="avatar">${esc(iniciais(nomeCurto(p)))}</div><div class="grow"><div class="t">${esc(p.quem || '?')}</div><div class="s">${PAPEL[p.papel] || ''} · ${plural(p.acoes, 'ação', 'ações')} e ${plural(p.acessos, 'acesso')} em 30 dias</div></div><div class="small muted r">último uso<br><b>${diaAtv(p.ultimo) === today() ? 'hoje' : date(diaAtv(p.ultimo))} ${horaAtv(p.ultimo)}</b></div></div>`).join('')}</div>`;
+  }
+  if (buscas[current.pattern]) filtrarBusca(app, buscas[current.pattern]);
+}
+
+function vAtividade({ query }) {
+  if (!store.ehDono() && store.modo === 'nuvem') return shell('Atividade', empty('Somente o dono vê o registro de atividades.', 'users'));
+  const k = query.p || '7d';
+  handlers = {
+    atvMais: () => carregarAtividade(query, { mais: true }),
+    atvRecarregar: () => carregarAtividade(query, { forcar: true }),
+    atvGrupo: (el) => { const l = atv.linhas[+el.dataset.i]; modal({ title: esc(nomeCurto(l)) + ' · ' + horaAtv(l.em), body: `<div class="list">${l.itens.map(({ x, txt }) => `<div class="li"><div class="grow"><div class="t">${txt}</div><div class="s">${horaAtv(x.em)}</div></div></div>`).join('')}</div>` }); },
+  };
+  const link = (p) => `#/atividade?${new URLSearchParams({ ...(query.u ? { u: query.u } : {}), p })}`;
+  return shell('Atividade', `
+    ${pageHead('Atividade', 'O que cada pessoa fez no sistema: gestores, sócios e parceiros. Só você (dono) vê esta tela.', `${busca('Buscar pessoa, parceiro, rótulo…')}<button class="btn ghost" data-act="atvRecarregar">${icon('refresh')} Atualizar</button>`)}
+    ${store.modo !== 'nuvem' ? empty('O registro de atividades funciona com o banco na nuvem (não na demonstração).', 'users') : `
+    <div class="card col"><h2>Quem usou nos últimos 30 dias</h2><div id="atvPessoas" class="small muted">Carregando…</div></div>
+    <div class="seg mt" style="max-width:100%;overflow-x:auto">${PERIODOS_ATV.map(([v, n]) => `<button class="${k === v ? 'on' : ''}" data-act="goto" data-h="${link(v)}">${n}</button>`).join('')}</div>
+    <div id="atividade"></div>`}`);
 }
 
 // ---------- Documentos para imprimir ----------
@@ -973,7 +1131,7 @@ function vLogin() {
 const ROUTES = [
   ['/painel', vPainel], ['/aovivo', vAoVivo], ['/estoque', vEstoque], ['/consignacao', vConsignacao], ['/remessas', vRemessas], ['/parceiros', vParceiros], ['/parceiro/:id', vParceiro],
   ['/fechamentos', vFechamentos], ['/fechamento/:id', vFechamento], ['/novo-fechamento/:cid', vNovoFechamento], ['/financeiro', vFinanceiro],
-  ['/inteligencia', vInteligencia], ['/produtos', vProdutos], ['/produto/:id', vProduto], ['/config', vConfig], ['/mais', vMais],
+  ['/inteligencia', vInteligencia], ['/produtos', vProdutos], ['/produto/:id', vProduto], ['/atividade', vAtividade], ['/config', vConfig], ['/mais', vMais],
   ['/imprimir/fechamento/:id', vImprimirFechamento], ['/imprimir/romaneio/:cid', vImprimirRomaneio],
 ];
 
@@ -986,6 +1144,7 @@ function render(view, params, pattern) {
   app.innerHTML = logged ? view(params) : vLogin();
   if (logged && buscas[pattern]) filtrarBusca(app, buscas[pattern]);
   if (logged && pattern === '/config' && store.modo === 'nuvem') carregarEquipe();
+  if (logged && pattern === '/atividade') carregarAtividade(params.query);
   mountCharts(app);
   if (!logged) app.querySelector('[name=p0]')?.focus();
 }

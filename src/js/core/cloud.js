@@ -196,6 +196,7 @@ export function criarNuvem(app, hooks) {
     await carregar();
     ouvir();
     enviar();
+    sb.rpc('registrar_acesso').then(({ error }) => error && console.warn('registrar_acesso', error.message)); // registro de atividades
     return true;
   }
 
