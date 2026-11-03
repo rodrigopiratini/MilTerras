@@ -862,7 +862,7 @@ function modalProduto(id, onSalvo, onCancelar) {
 }
 
 
-const PAPEL = { dono: 'Dono', gestor: 'Usuário', usuario: 'Parceiro', parceiro: 'Parceiro', suporte: 'Desenvolvedor (suporte)' };
+const PAPEL = { dono: 'Administrador', gestor: 'Gestor', usuario: 'Usuário (Parceiro)', parceiro: 'Usuário (Parceiro)', suporte: 'Desenvolvedor' };
 const CAMPOS = { nome: 'nome', codigo: 'código', pin: 'PIN', telefone: 'telefone', email: 'e-mail', contato: 'contato', cidade: 'cidade', cnpj: 'CNPJ', cicloDias: 'ciclo de acerto', prazoDias: 'prazo',
   formasPagamento: 'formas de pagamento', formaPadrao: 'forma padrão', garcons: 'equipe', precosCarta: 'preços de carta', ativo: 'ativo', preco: 'preço', precoCarta: 'preço de carta', estoqueMin: 'estoque mínimo',
   descricao: 'descrição', valor: 'valor', categoria: 'categoria', data: 'data', qtd: 'quantidade', obs: 'observação', status: 'status', itens: 'itens', vencimento: 'vencimento', formaPagamento: 'forma de pagamento',

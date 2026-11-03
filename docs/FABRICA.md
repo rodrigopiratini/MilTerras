@@ -20,6 +20,14 @@ e dentro da pasta atendem todas as empresas daquele segmento.
 | Publicação automática + aviso "Nova versão · Atualizar" | `.github/workflows/pages.yml` |
 | **Assistente (IA)** ✦ no topo e botão **+** com as ações de cada tela | `src/js/core/assistente.js` + função `supabase/functions/assistente` |
 
+## Níveis de acesso (iguais em todos os apps)
+| Nível | Quem | Como entra | O que pode |
+|---|---|---|---|
+| **Desenvolvedor** | quem cuida da fábrica (`<pasta>.plataforma_admins`) | e-mail na Gestão › Plataforma | todas as empresas: assinatura, convite de administrador, **Ver / Corrigir** (2 h, com verificação em duas etapas) |
+| **Administrador** | o dono da empresa cliente (papel `dono`) | e-mail na Gestão | tudo da empresa; convida e remove gestores; vê o registro de atividades |
+| **Gestor** | alguém delegado pelo Administrador (papel `gestor`) | e-mail na Gestão, por convite | toda a Gestão, sem convidar/remover pessoas nem ver o registro |
+| **Usuário** | o pessoal de ponta: motorista, parceiro, técnico (papel `usuario`) | código + PIN no app de campo | só o que é dele (regras das coleções) |
+
 ## O que cada segmento escreve
 1. `src/js/segmento.js`: nome, cores do ícone, planos, quem é o usuário (motorista, parceiro, técnico) e as **coleções** com as regras de acesso.
 2. `src/css/segmento.css`: as cores da marca.

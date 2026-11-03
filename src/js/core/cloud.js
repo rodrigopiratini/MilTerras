@@ -26,7 +26,7 @@ export function criarNuvem(app, hooks) {
   let status = 'online';
   const empresa = () => perfil?.empresaId;
   const ehGestao = () => perfil?.papel === 'dono' || perfil?.papel === 'gestor';
-  // Visita de suporte: o administrador da plataforma abriu uma empresa (Plataforma › Abrir). Vem do banco em meu_perfil.
+  // Visita de suporte: o desenvolvedor abriu uma empresa (Plataforma › Abrir). Vem do banco em meu_perfil.
   const suporte = () => (perfil?.suporte ? { ...perfil.suporte, nome: perfil.empresa?.nome || '' } : null);
   let fimVisita = null;
 
@@ -157,7 +157,7 @@ export function criarNuvem(app, hooks) {
   async function iniciarSessao() {
     await lerPerfil();
     clearTimeout(fimVisita);
-    // a visita vence sozinha (2 h): o app volta para a conta do próprio administrador
+    // a visita vence sozinha (2 h): o app volta para a conta do próprio desenvolvedor
     if (perfil?.suporte?.ate) fimVisita = setTimeout(() => recomecar().then(() => hooks.onChange?.('recarregado', true)), Math.max(1000, new Date(perfil.suporte.ate) - Date.now() + 1000));
     if (!perfil?.empresaId) { canal?.unsubscribe(); state = null; return false; }
     await carregar();
@@ -253,7 +253,7 @@ export function criarNuvem(app, hooks) {
       async apagar(ref) { const { error } = await sb.from('acessos').delete().eq('empresa_id', empresa()).eq('ref', ref); if (error) throw new Error(error.message); },
     },
     async renomearEmpresa(nome) { const { error } = await sb.from('empresas').update({ nome }).eq('id', empresa()); if (error) throw new Error(error.message); perfil.empresa.nome = nome; },
-    // ---- Visita de suporte (administrador) ----
+    // ---- Visita de suporte (desenvolvedor) ----
     // Verificação em duas etapas (app autenticador): o banco só abre empresas com a sessão em aal2.
     mfa: {
       async nivel() { const { data } = await sb.auth.mfa.getAuthenticatorAssuranceLevel(); return data?.currentLevel || 'aal1'; },

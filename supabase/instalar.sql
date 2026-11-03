@@ -13,7 +13,7 @@ grant usage on schema milterras to anon, authenticated, service_role;
 -- =====================================================================
 --
 -- Modelo
---   empresas  → cada cliente pagante (ex.: uma transportadora). Todos os dados levam empresa_id.
+--   empresas  → cada cliente pagante (ex.: uma frota). Todos os dados levam empresa_id.
 --   docs      → todos os registros do app como documentos JSON (coluna data), separados por coleção
 --               (ex.: veiculos, viagens). Novas coleções não precisam de tabela nova: basta
 --               declarar em src/js/segmento.js (o gerar.mjs grava as regras na tabela colecoes).
@@ -23,12 +23,12 @@ grant usage on schema milterras to anon, authenticated, service_role;
 --                 campo_ref: campo que diz a quem pertence o documento (ex.: motoristaId; 'id' = o próprio)
 --                 protegidos: campos que o usuário não altera (ex.: valor do frete)
 --                 trava: campo booleano; quando true o usuário não altera nem apaga mais (ex.: conferido)
---   perfis    → quem é quem: dono / gestor (e-mail e senha) ou usuario (código + PIN, login anônimo)
+--   perfis    → quem é quem: dono = Administrador, gestor = Gestor (e-mail e senha) ou usuario = Usuário (código + PIN, login anônimo)
 --   acessos   → código + PIN de cada usuário do app de campo (motorista, parceiro, técnico…)
 --
 -- Assinatura: empresas.situacao (teste | ativa | suspensa | cancelada). Fora do teste ou do
 -- pagamento em dia, o banco recusa gravações (os dados continuam visíveis para exportar).
--- O administrador da plataforma (tabela plataforma_admins) gerencia as empresas pelo app de Gestão.
+-- O desenvolvedor (tabela plataforma_admins) gerencia as empresas pelo app de Gestão.
 
 create extension if not exists pgcrypto;
 
@@ -111,7 +111,7 @@ create table if not exists milterras.tentativas_login (
 
 create table if not exists milterras.plataforma_admins (email text primary key);
 
--- Visita de suporte: o administrador da plataforma abre uma empresa pelo próprio app (com o login dele,
+-- Visita de suporte: o desenvolvedor abre uma empresa pelo próprio app (com o login dele,
 -- verificação em duas etapas e prazo). Enquanto vale, o app enxerga aquela empresa como o dono enxerga.
 create table if not exists milterras.suporte_visitas (
   user_id uuid primary key references auth.users(id) on delete cascade,
@@ -143,7 +143,7 @@ language sql stable security definer set search_path = milterras, public, extens
 $$ select coalesce((auth.jwt()->>'is_anonymous')::boolean, false) = false
       and exists (select 1 from milterras.plataforma_admins where lower(email) = lower(auth.jwt()->>'email')) $$;
 
--- Visita de suporte em vigor: só para administrador, dentro do prazo e com a verificação em duas etapas
+-- Visita de suporte em vigor: só para o desenvolvedor, dentro do prazo e com a verificação em duas etapas
 -- feita nesta sessão (aal2). Sem isso as funções abaixo ignoram a visita.
 create or replace function milterras.visita_empresa() returns uuid
 language sql stable security definer set search_path = milterras, public, extensions as
@@ -272,7 +272,7 @@ create trigger tg_apagar_acesso after delete on milterras.acessos for each row e
 -- ---------- Entrada e cadastro ----------
 create or replace function milterras.meu_perfil() returns json
 language sql stable security definer set search_path = milterras, public, extensions as $$
-  -- visita de suporte em vigor: o administrador vê a empresa visitada como o dono
+  -- visita de suporte em vigor: o desenvolvedor vê a empresa visitada como o administrador dela
   select json_build_object(
     'papel', 'dono', 'empresaId', e.id, 'ref', null, 'admin', true, 'email', auth.jwt()->>'email',
     'suporte', json_build_object('modo', v.modo, 'ate', v.ate),
@@ -292,7 +292,7 @@ language sql stable security definer set search_path = milterras, public, extens
   where milterras.eh_admin() and milterras.visita_empresa() is null and not exists (select 1 from milterras.perfis where user_id = auth.uid())
 $$;
 
--- Administrador: abre uma empresa no próprio app (só ver ou ver e corrigir) por 2 horas.
+-- Desenvolvedor: abre uma empresa no próprio app (só ver ou ver e corrigir) por 2 horas.
 -- Exige a verificação em duas etapas nesta sessão. Fica no registro de atividades da empresa.
 create or replace function milterras.suporte_abrir(p_empresa uuid, p_modo text) returns json
 language plpgsql security definer set search_path = milterras, public, extensions as $$
@@ -339,7 +339,7 @@ begin
   return true;
 end $$;
 
--- Desenvolvedor (administrador da plataforma): convite de DONO para uma empresa (ex.: empresa criada para o cliente)
+-- Desenvolvedor: convite de DONO para uma empresa (ex.: empresa criada para o cliente)
 create or replace function milterras.plataforma_convite_dono(p_empresa uuid) returns text
 language plpgsql security definer set search_path = milterras, public, extensions as $$
 declare v_codigo text := milterras.gerar_codigo(8);
@@ -379,7 +379,7 @@ create or replace function milterras.criar_convite(p_nome text) returns text
 language plpgsql security definer set search_path = milterras, public, extensions as $$
 declare v_codigo text := milterras.gerar_codigo(8); v_emp uuid := milterras.minha_empresa();
 begin
-  if not milterras.eh_dono(v_emp) or milterras.so_leitura(v_emp) then raise exception 'Somente o dono pode convidar gestores'; end if;
+  if not milterras.eh_dono(v_emp) or milterras.so_leitura(v_emp) then raise exception 'Somente o administrador pode convidar gestores'; end if;
   insert into milterras.convites (codigo, empresa_id, nome, criado_por) values (v_codigo, v_emp, nullif(trim(p_nome), ''), auth.uid());
   return v_codigo;
 end $$;
@@ -400,7 +400,7 @@ create or replace function milterras.remover_gestor(p_user uuid) returns void
 language plpgsql security definer set search_path = milterras, public, extensions as $$
 declare v_emp uuid := milterras.minha_empresa();
 begin
-  if not milterras.eh_dono(v_emp) or milterras.so_leitura(v_emp) then raise exception 'Somente o dono pode remover gestores'; end if;
+  if not milterras.eh_dono(v_emp) or milterras.so_leitura(v_emp) then raise exception 'Somente o administrador pode remover gestores'; end if;
   delete from milterras.perfis where user_id = p_user and empresa_id = v_emp and papel = 'gestor';
 end $$;
 
@@ -479,7 +479,7 @@ create or replace function milterras.atividade_log(p_antes timestamptz default n
 language plpgsql stable security definer set search_path = milterras, public, extensions as $$
 declare v_emp uuid := milterras.minha_empresa();
 begin
-  if not milterras.eh_dono(v_emp) then raise exception 'Somente o dono vê o registro de atividades'; end if;
+  if not milterras.eh_dono(v_emp) then raise exception 'Somente o administrador vê o registro de atividades'; end if;
   return json_build_object(
     'itens', coalesce((select json_agg(x order by x.em desc, x.id desc) from (
         select id, em, user_id "userId", papel, quem, ref, acao, colecao, registro, antes, depois from milterras.atividade
@@ -491,7 +491,7 @@ begin
           from milterras.atividade where empresa_id = v_emp and em > now() - interval '30 days' and user_id is not null group by user_id) x), '[]'::json));
 end $$;
 
--- ---------- Plataforma (administrador da fábrica de apps) ----------
+-- ---------- Plataforma (desenvolvedor da fábrica de apps) ----------
 create or replace function milterras.plataforma_empresas() returns json
 language plpgsql stable security definer set search_path = milterras, public, extensions as $$
 begin
