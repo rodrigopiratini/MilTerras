@@ -1,16 +1,17 @@
-// App de Gestão — Mil Terras (distribuidora)
+// App de Gestão da Mil Terras (distribuidora). Login, empresa, equipe, acessos dos parceiros (código + PIN),
+// assinatura, registro de atividades, plataforma e assistente vêm do núcleo (src/js/core/app.js).
+import { criarApp } from '../core/app.js';
 import * as store from '../core/store.js';
-import * as D from '../core/domain.js';
-import { seed } from '../core/seed.js';
+import * as D from '../dominio.js';
 import { money, money0, moneyK, int, percent, date, dateShort, relDays, today, addDays, diffDays, monthLabel, esc, sum, uid, plural, sortBy } from '../core/fmt.js';
-import { icon, router, delegate, modal, closeModal, confirmar, toast, kpi, badge, empty, thumb, stepper, stepHandler, insightCard, fichaVinho, iniciais, qtdBadge, waLink, download, toCSV, asset, instalar, bannerInstalar, dispensarBanner, registerSW, verificarAtualizacao, versaoApp, moneyInput, parseMoney, filtrarBusca, buscaInput } from '../core/ui.js';
-import { chart, mountCharts, resetCharts, legend, hbars } from '../core/charts.js';
-import { novoWizard, renderWizard, wizardHandlers, statusBadge, ajustesHTML, acertosHTML } from '../core/fechamento-ui.js';
-import { criarIA, extrasGestao } from '../core/ia.js';
+import { icon, modal, closeModal, confirmar, toast, kpi, badge, empty, stepper, stepHandler, insightCard, iniciais, waLink, download, toCSV, asset, moneyInput, parseMoney } from '../core/ui.js';
+import { thumb, fichaVinho, qtdBadge } from '../vinhos-ui.js';
+import { chart, legend, hbars } from '../core/charts.js';
+import { novoWizard, renderWizard, wizardHandlers, statusBadge, ajustesHTML, acertosHTML } from '../fechamento-ui.js';
+import { extrasGestao } from '../ia-extras.js';
 
-const app = document.getElementById('app');
 const S = () => store.get();
-const SESSION = 'milterras:gestor';
+let handlers = {};   // ações da tela atual (assistente de fechamento)
 
 const NAV = [
   ['#/painel', 'chart', 'Painel'],
@@ -23,38 +24,9 @@ const NAV = [
   ['#/financeiro', 'money', 'Financeiro'],
   ['#/inteligencia', 'spark', 'Inteligência'],
   ['#/produtos', 'bottle', 'Rótulos'],
-  ['#/atividade', 'users', 'Atividade'],
-  ['#/config', 'gear', 'Configurações'],
 ];
-// O registro de atividades é exclusivo do dono
-const navItens = () => NAV.filter(([h]) => h !== '#/atividade' || store.ehDono());
 const TABS = [['#/painel', 'chart', 'Painel'], ['#/estoque', 'box', 'Estoque'], ['#/fechamentos', 'receipt', 'Fechamentos'], ['#/parceiros', 'store', 'Parceiros'], ['#/mais', 'menu', 'Mais']];
 
-let current = { view: null, params: {}, pattern: '' };
-let handlers = {};
-
-// ---------- Assistente (IA) e botão + ----------
-const IA_SVG = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></svg>';
-const COL_IA = { produtos: ['Rótulos', true], clientes: ['Parceiros', true], movs: ['Movimentações de estoque', true], vendas: ['Vendas registradas pelos parceiros', false],
-  fechamentos: ['Fechamentos', false], pedidos: ['Pedidos de reposição dos parceiros', false], despesas: ['Despesas', true] };
-const ia = criarIA({
-  app: 'gestao',
-  colecoes: () => Object.fromEntries(Object.entries(COL_IA).map(([k, [nome, escrita]]) => [k, { nome, escrita: escrita && !store.somenteLeituraAtiva() }])),
-  extras: () => extrasGestao(S()), visivel: () => S(), quem: () => store.perfil()?.email || '',
-  sugestoes: () => ({
-    '/painel': ['Como foi este mês comparado com o anterior?', 'Quais parceiros mais venderam este mês?'],
-    '/aovivo': ['O que mais vendeu hoje?'],
-    '/estoque': ['Quais rótulos estão acabando no estoque central?', 'Quanto vale o estoque central a preço de parceiro?'],
-    '/consignacao': ['Qual parceiro tem mais garrafas paradas?', 'Quanto tenho em consignação no total?'],
-    '/remessas': ['Quais remessas ainda não foram entregues?'],
-    '/parceiros': ['Quais parceiros estão com o fechamento atrasado?', 'Qual parceiro vende mais por mês?'],
-    '/parceiro/:id': ['Como está este parceiro: vendas, estoque e pagamentos?'],
-    '/fechamentos': ['Quais fechamentos estão aguardando aprovação?'],
-    '/financeiro': ['Quem está devendo e há quantos dias?', 'Onde estou gastando mais?'],
-    '/inteligencia': ['Que rótulos devo repor em cada parceiro?'],
-    '/produtos': ['Qual rótulo dá mais margem?', 'Quais rótulos venderam menos nos últimos 60 dias?'],
-  }[current.pattern] || []),
-});
 function maisGestor(rota, p) {
   const it = (icone, texto, act, dados) => ({ icone, texto, act, dados });
   const estoque = [it('plus', 'Entrada de estoque', 'mov', { t: 'entrada' }), it('truck', 'Nova remessa', 'remessa'), it('swap', 'Venda direta', 'mov', { t: 'venda_direta' })];
@@ -69,58 +41,28 @@ function maisGestor(rota, p) {
     '/produtos': [it('bottle', 'Novo rótulo', 'editProduto')],
   }[rota] || estoque;
 }
-function escolherMais(x) {
-  if (x.h) { location.hash = x.h; return; }
-  const fn = handlers[x.act] || common[x.act];
-  if (!fn) return;
-  const el = document.createElement('button');
-  Object.entries(x.dados || {}).forEach(([k, v]) => { el.dataset[k] = v; });
-  fn(el, new Event('click'));
-}
 
-// ---------- Shell ----------
-function shell(title, content, { back } = {}) {
-  const s = S();
-  const pend = s.fechamentos.filter((f) => f.status === 'enviado').length;
-  const route = '#' + (location.hash.slice(1).split('?')[0] || '');
-  const isOn = (h) => route === h || route.startsWith(h + '/') || (h === '#/parceiros' && route.startsWith('#/parceiro')) || (h === '#/fechamentos' && route.startsWith('#/fechamento'));
-  const remPend = D.remessas(s).filter((r) => r.status !== 'entregue').length + D.pedidos(s).filter((p) => p.status === 'solicitado').length;
-  const b = (h) => (h === '#/fechamentos' && pend ? `<span class="badge dot">${pend}</span>` : h === '#/remessas' && remPend ? `<span class="badge dot">${remPend}</span>` : '');
-  return `<div class="shell">
-    <aside class="side">
-      <div class="brand"><img src="${asset('assets/logo/logo_h_negativo.png')}" alt="Mil Terras"><div class="who">Gestão</div></div>
-      ${navItens().map(([h, ic, n]) => `<a class="nav-a ${isOn(h) ? 'on' : ''}" href="${h}">${icon(ic)}<span>${n}</span>${b(h)}</a>`).join('')}
-      <a class="nav-a" href="#" data-act="eaiAbrir">${icon('spark')}<span>Assistente</span></a>
-      <div class="foot">${syncBadge()}<br><a href="#" data-act="logout" style="color:#C9B3AC">Sair</a></div>
-    </aside>
-    <div>
-      <header class="topbar">${back ? `<button data-act="back" aria-label="Voltar">${icon('arrowL')}</button>` : `<img src="${asset('assets/logo/simbolo_negativo.png')}" alt="">`}<div class="t ellipsis">${title}</div><a href="#/fechamentos" style="color:#fff;position:relative">${icon('inbox')}${pend ? `<span class="badge dot" style="position:absolute;top:-6px;right:-8px">${pend}</span>` : ''}</a><button class="eai-topo" data-act="eaiAbrir" aria-label="Assistente" title="Assistente" style="color:#fff">${IA_SVG}</button></header>
-      <main class="main">${content}</main>
-    </div>
-    <nav class="tabbar">${TABS.map(([h, ic, n]) => `<a href="${h}" class="${isOn(h) ? 'on' : ''}">${icon(ic)}<span>${n}</span>${b(h)}</a>`).join('')}</nav>
-    <button class="eai-fab" data-act="eaiMais" aria-label="Ações e assistente">+</button>
-  </div>`;
-}
-const DEMO_Q = store.modo === 'local' && location.search ? location.search : '';
-function syncBadge() {
-  const st = store.status();
-  const t = { local: store.demo && S().meta.demo ? 'Demonstração (dados locais)' : 'Dados neste navegador', online: 'Sincronizado', enviando: `Enviando ${store.pendentes()}…`, offline: `Sem internet · ${store.pendentes()} pendente(s)` }[st] || st;
-  return `<span class="sync" style="${st === 'offline' ? 'color:var(--warn)' : st === 'local' ? 'color:var(--dourado)' : ''}">${t}</span>`;
-}
-const buscas = {};
-const busca = (ph) => buscaInput(buscas[current.pattern] || '', ph);
-// Link para abrir o app do parceiro em modo visualização (somente leitura)
-const urlApp = (cid) => { const u = new URL('../cliente/', location.href); u.searchParams.set('ver', cid); if (store.modo === 'local' && store.demo) u.searchParams.set('demo', '1'); return u.href; };
+const shell = (...a) => A.tela(...a);
+const pageHead = (...a) => A.pageHead(...a);
+const busca = (ph) => A.busca(ph);
+const rerender = () => A.rerender();
+// Ver o app do parceiro como ele vê (só leitura)
+const urlApp = (cid) => A.linkVer(cid);
 const verApp = (cid, cls = 'btn ghost sm') => `<a class="${cls}" target="_blank" rel="noopener" href="${urlApp(cid)}" title="Ver o app do parceiro como ele vê">${icon('link')} Ver app</a>`;
-const pageHead = (title, sub = '', actions = '') => `<div class="pagehead"><div><h1>${title}</h1>${sub ? `<div class="sub">${sub}</div>` : ''}</div><div class="row wrap">${actions}</div></div>`;
+const linkParceiro = () => A.linkUsuario();
 
 // Cadastro dentro de outra ação: guarda o que já foi digitado, abre o cadastro e volta
 const lerForm = (id) => { const f = document.getElementById(id); return f ? Object.fromEntries([...f.elements].filter((e) => e.name).map((e) => [e.name, e.value])) : {}; };
 const aplicarForm = (id, snap = {}) => { const f = document.getElementById(id); if (!f) return; for (const e of f.elements) if (e.name && snap[e.name] !== undefined && e.type !== 'hidden' && !e.dataset.onchange?.startsWith('cli')) e.value = snap[e.name]; };
 function novoParceiro(onSalvo, onCancelar) {
   modal({ title: 'Novo parceiro', wide: true, body: formCliente() + (onCancelar ? '<div class="tiny muted mt-s">Ao salvar, você volta para onde estava.</div>' : ''),
-    handlers: { salvarCliente: (f) => common.salvarCliente(f, onSalvo), novoCodigo: (el) => common.novoCodigo(el), close: () => { closeModal(); onCancelar?.(); } } });
+    handlers: { salvarCliente: (f) => acoes.salvarCliente(f, onSalvo), close: () => { closeModal(); onCancelar?.(); } } });
 }
+
+// Mensagem com o acesso do parceiro (código + PIN do núcleo: Configurações › Acesso dos parceiros)
+const msgAcesso = (c, a) => `Olá${c.contato ? ', ' + c.contato.split(' ')[0] : ''}! Este é o app da Mil Terras para registrar as vendas dos nossos vinhos, acompanhar relatórios e fazer os fechamentos:\n${linkParceiro()}\n\nCódigo do estabelecimento: ${a.codigo}\nPIN: ${a.pin}\n\nPara instalar como app:\n• iPhone: abra o link no Safari › Compartilhar › Adicionar à Tela de Início\n• Android: abra no Chrome › menu ⋮ › Instalar app`;
+const mailAcesso = (c, a) => `mailto:${encodeURIComponent(c.email)}?subject=${encodeURIComponent('Seu acesso ao app Mil Terras')}&body=${encodeURIComponent(msgAcesso(c, a))}`;
+async function acessoDe(cid) { try { return (await store.acessos.listar()).find((a) => a.ref === cid) || null; } catch { return null; } }
 
 // Garrafas em consignação por parceiro (clique abre o detalhamento editável)
 function graficoParceiros(s) {
@@ -227,7 +169,6 @@ function vPainel() {
 
   return shell('Painel', `
     ${s.meta.demo ? `<div class="demo-banner">${icon('info')} <span class="grow">Catálogo e preços reais da Mil Terras. Parceiros e movimentações são <b>fictícios</b>, simulados para demonstrar os painéis.</span><a href="#/config">Começar do zero</a></div>` : ''}
-    ${bannerInstalar()}
     ${(() => { const h = D.resumoRede(s, today()); return `<a class="card row mb" href="#/aovivo" style="color:inherit;padding:12px 16px"><span class="live small" style="font-weight:600">Ao vivo</span><span class="grow small ink2">Hoje os parceiros já registraram <b>${plural(h.garrafas, 'garrafa')}</b> · ${money0(h.valor)} a faturar · ${h.porCliente.length} parceiro(s) vendendo</span>${icon('arrowR')}</a>`; })()}
     ${pageHead(`Olá, ${s.meta.empresa}`, new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' }), `<a class="btn ghost" href="#/consignacao?nova=1">${icon('truck')} Nova remessa</a><a class="btn" href="#/estoque?entrada=1">${icon('plus')} Entrada</a>`)}
     <div class="grid g4">
@@ -344,7 +285,7 @@ function modalMov(tipo, snap = {}, onSalvo) {
       ${tipo === 'ajuste' ? `<div class="seg"><button type="button" class="on" data-act="sinal" data-v="1">Adicionar</button><button type="button" data-act="sinal" data-v="-1">Remover</button></div><input type="hidden" name="sinal" value="1">` : ''}
       ${tipo === 'entrada' ? `<div class="row between"><span class="small muted">Informe a quantidade de cada rótulo recebido.</span><button type="button" class="btn ghost sm" data-act="novoRotuloMov">${icon('plus')} Cadastrar novo rótulo</button></div>` : ''}
       <div class="card pad-0"><div class="list" style="padding:0 14px">${s.produtos.filter((p) => p.ativo).map((p) => `<div class="li">${thumb(p, 'sm')}<div class="grow"><div class="t">${esc(p.nome)}</div><div class="s">Saldo ${est[p.id]}${tipo === 'entrada' ? '' : tipo === 'venda_direta' ? ` · tabela ${money(p.preco)}` : ''}</div></div>
-        ${tipo === 'entrada' ? moneyInput('custo:' + p.id, p.custo, { width: 120, extra: 'title="Custo unitário"' }) : ''}
+        ${tipo === 'entrada' ? moneyInput('custo:' + p.id, D.custoDe(s, p.id), { width: 120, extra: 'title="Custo unitário"' }) : ''}
         ${tipo === 'venda_direta' ? moneyInput('preco:' + p.id, p.preco * 1.25, { width: 120, extra: 'title="Preço unitário"' }) : ''}
         ${stepper('q:' + p.id, 0, tipo === 'entrada' ? {} : { max: tipo === 'ajuste' ? 9999 : Math.max(0, est[p.id]) })}</div>`).join('')}</div></div>
       ${tipo === 'entrada' ? '<div class="tiny muted">Custo unitário por garrafa. Digite só os números (ex.: 25990 = R$ 259,90).</div>' : ''}
@@ -367,7 +308,7 @@ function modalMov(tipo, snap = {}, onSalvo) {
         let total = 0;
         store.commit((st) => {
           for (const { p, q } of itens) {
-            if (tipo === 'entrada') { const cu = parseMoney(fd.get('custo:' + p.id)) || p.custo; total += cu * q; D.addMov(st, { data, tipo, produtoId: p.id, qtd: q, custoUnit: cu, obs }); }
+            if (tipo === 'entrada') { const cu = parseMoney(fd.get('custo:' + p.id)) || D.custoDe(st, p.id); total += cu * q; D.addMov(st, { data, tipo, produtoId: p.id, qtd: q, custoUnit: cu, obs }); }
             else if (tipo === 'venda_direta') { const pu = parseMoney(fd.get('preco:' + p.id)); total += pu * q; D.addMov(st, { data, tipo, produtoId: p.id, qtd: q, precoUnit: pu, obs }); }
             else if (tipo === 'ajuste') D.addMov(st, { data, tipo, produtoId: p.id, qtd: q * +fd.get('sinal'), obs: obs || 'Ajuste de inventário' });
             else D.addMov(st, { data, tipo, produtoId: p.id, qtd: q, obs });
@@ -499,7 +440,7 @@ function vParceiros() {
   return shell('Parceiros', `
     ${pageHead('Parceiros', `${s.clientes.filter((c) => c.ativo).length} estabelecimentos ativos`, `${busca('Buscar parceiro…')}<button class="btn" data-act="editCliente">${icon('plus')} Novo parceiro</button>`)}
     <div class="card pad-0"><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Parceiro</th><th class="hide-m">Cidade</th><th class="r">Receita 90d</th><th class="r hide-m">Garrafas 90d</th><th class="r hide-m">Consignado</th><th class="r hide-m">Giro</th><th>Próx. fechamento</th><th></th></tr></thead>
-    <tbody>${rank.map((x) => { const c = x.cliente; const per = D.periodoAtual(s, c.id); return `<tr class="click" data-act="goto" data-h="#/parceiro/${c.id}" data-busca="${esc(c.nome + ' ' + c.cidade + ' ' + c.codigo + ' ' + (c.contato || ''))}">
+    <tbody>${rank.map((x) => { const c = x.cliente; const per = D.periodoAtual(s, c.id); return `<tr class="click" data-act="goto" data-h="#/parceiro/${c.id}" data-busca="${esc(c.nome + ' ' + c.cidade + ' ' + (c.contato || ''))}">
       <td><div class="row"><div class="avatar">${iniciais(c.nome)}</div><div><div style="font-weight:500">${esc(c.nome)}</div><div class="tiny muted">${c.tipo} · desde ${date(c.desde)}</div></div></div></td>
       <td class="hide-m">${esc(c.cidade)}</td><td class="r"><b>${money0(x.receita)}</b></td><td class="r hide-m">${x.garrafas}</td><td class="r hide-m">${x.garrafasConsig} gf · ${moneyK(x.emConsig)}</td><td class="r hide-m">${x.giro.toFixed(1)}×</td>
       <td>${per.pendente ? badge('Enviado — conferir', 'warn') : badge(date(per.previsto), per.previsto < today() ? 'crit' : '')}</td><td class="r" onclick="event.stopPropagation()">${verApp(c.id)}</td></tr>`; }).join('')}</tbody></table></div></div>
@@ -618,15 +559,6 @@ function modalCondicao(cid) {
   m.addEventListener('input', () => { ler(); const d = m.querySelector('#cond-desc'); if (d) d.textContent = D.descCondicao({ partes }); });
 }
 
-// Código de acesso aleatório e único (sem letras/números que confundem: 0/O, 1/I)
-function gerarCodigo() {
-  const A = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  const usados = new Set((S()?.clientes || []).map((c) => c.codigo));
-  let cod;
-  do { cod = 'MT' + Array.from({ length: 4 }, () => A[Math.floor(Math.random() * A.length)]).join(''); } while (usados.has(cod));
-  return cod;
-}
-
 function formCliente(c = {}) {
   const novo = !c.id;
   return `<form id="fcli" class="card col" data-onsubmit="salvarCliente" data-id="${c.id || ''}">
@@ -645,7 +577,7 @@ function formCliente(c = {}) {
     <div class="field"><span>Formas de pagamento liberadas</span><div class="chips">${D.FORMAS_PAGAMENTO.map((f) => `<label class="chip"><input type="checkbox" name="forma" value="${f}" ${(c.formasPagamento || ['PIX']).includes(f) ? 'checked' : ''}> ${f}</label>`).join('')}</div></div>
     <div class="grid g2">
       <label class="field"><span>Garçons / equipe (separados por vírgula)</span><input class="input" name="garcons" value="${esc((c.garcons || []).filter((g) => g.ativo).map((g) => g.nome).join(', '))}"></label>
-      <div class="grid g2"><label class="field"><span>Código de acesso (automático)</span><div class="row gap-s"><input class="input" name="codigo" value="${esc(c.codigo || gerarCodigo())}" readonly style="font-weight:600;letter-spacing:.06em"><button type="button" class="iconbtn" data-act="novoCodigo" title="Gerar outro código">${icon('refresh')}</button></div></label><label class="field"><span>PIN (4 dígitos)</span><input class="input" name="pin" inputmode="numeric" maxlength="4" value="${esc(c.pin || String(Math.floor(1000 + Math.random() * 9000)))}"></label></div>
+      <div class="small muted" style="align-self:end">${novo ? 'O código e o PIN do app do parceiro são gerados ao cadastrar.' : 'Código e PIN do app do parceiro: <a href="#/config">Configurações › Acesso dos parceiros</a> (trocar o PIN ou bloquear desconecta os aparelhos).'}</div>
     </div>
     <div class="row between wrap">${novo ? '<span></span>' : `<label class="row small"><input type="checkbox" name="ativo" ${c.ativo ? 'checked' : ''}> Parceiro ativo</label>`}<button class="btn">${novo ? 'Cadastrar parceiro' : 'Salvar alterações'}</button></div>
   </form>`;
@@ -886,7 +818,7 @@ function reduzirImagem(arq, maxH = 480, maxW = 320) {
 
 function modalProduto(id, onSalvo, onCancelar) {
   const s = S();
-  const p = id ? D.produto(s, id) : { id: '', nome: '', tipo: 'Tinto', regiao: '', classificacao: '', uvas: '', teor: '', safra: new Date().getFullYear() - 2, preco: 0, custo: 0, precoCarta: 0, estoqueMin: 24, servir: '18–20 °C', descricao: '', harmonizacao: '', foto: 'assets/logo/simbolo.png', ativo: true };
+  const p = id ? { ...D.produto(s, id), custo: D.custoDe(s, id) } : { id: '', nome: '', tipo: 'Tinto', regiao: '', classificacao: '', uvas: '', teor: '', safra: new Date().getFullYear() - 2, preco: 0, custo: 0, precoCarta: 0, estoqueMin: 24, servir: '18–20 °C', descricao: '', harmonizacao: '', foto: 'assets/logo/simbolo.png', ativo: true };
   const f = (n, l, v, t = 'text') => `<label class="field"><span>${l}</span><input class="input" name="${n}" type="${t}" ${t === 'number' ? 'step="0.01"' : ''} value="${esc(v)}"></label>`;
   modal({ title: id ? 'Editar rótulo' : 'Novo rótulo', wide: true, body: `<form id="fprod" class="col">
     <div class="row gap-l" style="align-items:center">
@@ -917,73 +849,20 @@ function modalProduto(id, onSalvo, onCancelar) {
       if (!fd.foto) delete fd.foto;
       if (!fd.nome) return toast('Informe o nome');
       store.commit((st) => {
-        const alvo = id ? D.produto(st, id) : (st.produtos.push({ ...p, id: fd.nome.toLowerCase().normalize('NFD').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') + '-' + uid().slice(-3) }), st.produtos[st.produtos.length - 1]);
-        Object.assign(alvo, fd, { preco: parseMoney(fd.preco), custo: parseMoney(fd.custo), precoCarta: parseMoney(fd.precoCarta), estoqueMin: +fd.estoqueMin, safra: +fd.safra, ativo: !!fd.ativo });
+        const { custo: _c, ...base } = p;
+        const alvo = id ? D.produto(st, id) : (st.produtos.push({ ...base, id: fd.nome.toLowerCase().normalize('NFD').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') + '-' + uid().slice(-3) }), st.produtos[st.produtos.length - 1]);
+        const { custo, ...resto } = fd;
+        Object.assign(alvo, resto, { preco: parseMoney(fd.preco), precoCarta: parseMoney(fd.precoCarta), estoqueMin: +fd.estoqueMin, safra: +fd.safra, ativo: !!fd.ativo });
+        delete alvo.custo; // o custo fica em "custos" (o parceiro não vê)
+        D.definirCusto(st, alvo.id, parseMoney(custo));
       });
       closeModal(); toast('Rótulo salvo');
       onSalvo?.();
     } } });
 }
 
-// ---------- Configurações / mais ----------
-const msgAcesso = (c, base) => `Olá${c.contato ? ', ' + c.contato.split(' ')[0] : ''}! Este é o app da Mil Terras para registrar as vendas dos nossos vinhos, acompanhar relatórios e fazer os fechamentos:\n${base}\n\nCódigo do estabelecimento: ${c.codigo}\nPIN: ${c.pin}\n\nPara instalar como app:\n• iPhone: abra o link no Safari › Compartilhar › Adicionar à Tela de Início\n• Android: abra no Chrome › menu ⋮ › Instalar app`;
-const mailAcesso = (c, base) => `mailto:${encodeURIComponent(c.email)}?subject=${encodeURIComponent('Seu acesso ao app Mil Terras')}&body=${encodeURIComponent(msgAcesso(c, base))}`;
-async function carregarEquipe() {
-  const el = document.getElementById('equipe');
-  if (!el) return;
-  try {
-    const eq = await store.rpc('equipe');
-    const base = new URL('../gestor/', location.href).href;
-    el.innerHTML = `<div class="list">${eq.membros.map((m) => `<div class="li"><div class="avatar">${iniciais(m.email || '?')}</div><div class="grow"><div class="t">${esc(m.email)}${m.eu ? ' (você)' : ''}</div><div class="s">${m.papel === 'dono' ? 'Dono' : 'Gestor'} · desde ${date(m.desde.slice(0, 10))}</div></div>${store.ehDono() && m.papel === 'gestor' ? `<button class="btn ghost sm" data-act="removerGestor" data-u="${m.userId}" data-e="${esc(m.email)}">Remover</button>` : ''}</div>`).join('')}
-      ${eq.convites.map((c) => `<div class="li"><div class="avatar">${icon('link')}</div><div class="grow"><div class="t">Convite ${esc(c.codigo)}${c.nome ? ' · ' + esc(c.nome) : ''}</div><div class="s">Aguardando uso · vale até ${date(c.expira.slice(0, 10))}</div></div><a class="btn ghost sm" target="_blank" rel="noopener" href="${waLink('', msgConvite(c.codigo, base))}">${icon('whatsapp')}</a><button class="btn ghost sm" data-act="cancelarConvite" data-c="${c.codigo}">Cancelar</button></div>`).join('')}</div>`;
-  } catch (e) { el.textContent = 'Não foi possível carregar a equipe: ' + e.message + ' (rode novamente o supabase/instalar.sql no Supabase).'; }
-}
-const msgConvite = (codigo, base) => `Convite para a Gestão Mil Terras:\n${base}\n\n1. Toque em "Primeiro acesso"\n2. Use seu e-mail e crie uma senha\n3. Código: ${codigo}\n\nO convite vale por 7 dias e pode ser usado uma única vez.`;
 
-
-function vConfig() {
-  const s = S();
-  const base = new URL('../cliente/' + DEMO_Q, location.href).href;
-  const nuvem = store.modo === 'nuvem';
-  return shell('Configurações', `
-    ${pageHead('Configurações')}
-    <div class="grid g2">
-      <div class="card col"><h2>Acesso dos parceiros</h2><div class="small ink2">Cada parceiro entra no app <b>Mil Terras Parceiro</b> com o código do estabelecimento e um PIN. Envie o link pelo WhatsApp. Trocar o PIN (no cadastro do parceiro) desconecta os aparelhos dele.</div>
-        <div class="list">${s.clientes.filter((c) => c.ativo).map((c) => `<div class="li"><div class="grow"><div class="t">${esc(c.nome)}</div><div class="s">Código <b>${esc(c.codigo)}</b> · PIN <b>${esc(c.pin)}</b></div></div><div class="row gap-s"><a class="btn ghost sm" target="_blank" rel="noopener" href="${waLink(c.telefone, msgAcesso(c, base))}">${icon('whatsapp')} WhatsApp</a>${c.email ? `<a class="btn ghost sm" href="${mailAcesso(c, base)}">E-mail</a>` : ''}<button class="btn ghost sm" data-act="copiarAcesso" data-c="${c.id}">Copiar</button>${verApp(c.id)}</div></div>`).join('') || empty('Nenhum parceiro cadastrado ainda', 'store')}</div>
-        <a class="btn ghost" href="${base}" target="_blank" rel="noopener">${icon('link')} Abrir app do parceiro</a></div>
-      <div class="col">
-        ${nuvem ? `<div class="card col"><h2>Equipe de gestão</h2><div id="equipe" class="small muted">Carregando…</div>
-          ${store.ehDono() ? `<button class="btn ghost" data-act="convidar">${icon('plus')} Convidar gestor (ex.: sócio)</button><div class="tiny muted">O convidado acessa toda a Gestão, mas não pode remover você nem convidar outras pessoas. Você pode remover o acesso dele a qualquer momento.</div>` : '<div class="tiny muted">Somente o dono convida ou remove gestores.</div>'}</div>` : ''}
-        <div class="card col"><h2>Empresa</h2><form class="col" data-onsubmit="salvarEmpresa">
-          <label class="field"><span>Nome</span><input class="input" name="empresa" value="${esc(s.meta.empresa)}"></label>
-          <label class="field"><span>WhatsApp (com DDI e DDD)</span><input class="input" name="whatsapp" value="${esc(s.meta.whatsapp)}"></label>
-          <label class="field"><span>Instagram</span><input class="input" name="instagram" value="${esc(s.meta.instagram)}"></label>
-          ${nuvem ? '' : `<label class="field"><span>PIN do gestor (modo local)</span><input class="input" name="pinGestor" inputmode="numeric" maxlength="4" value="${esc(s.meta.pinGestor)}"></label>`}
-          <button class="btn">Salvar</button></form></div>
-        <div class="card col"><h2>Dados</h2>
-          ${nuvem ? `<div class="small ink2">${icon('check')} Conectado ao banco na nuvem (Supabase). Os dados ficam disponíveis em qualquer aparelho e são compartilhados com os parceiros em tempo real.</div>
-            <div class="small ink2">Seu acesso: <b>${store.ehDono() ? 'Dono' : 'Gestor'}</b>.</div>
-            <div class="row wrap"><button class="btn ghost" data-act="backup">${icon('download')} Exportar backup</button><button class="btn ghost" data-act="install">${icon('download')} Instalar app</button><a class="btn ghost" href="?demo=1#/painel" target="_blank" rel="noopener">${icon('spark')} Abrir demonstração</a></div>`
-          : `<div class="small ink2">${store.demo && s.meta.demo ? 'Você está na <b>demonstração</b>: dados fictícios salvos só neste navegador. Nada aqui afeta os dados reais.' : 'Os dados estão salvos só neste navegador.'}</div>
-            <div class="row wrap"><button class="btn ghost" data-act="backup">${icon('download')} Exportar backup</button><label class="btn ghost">${icon('upload')} Importar<input type="file" accept="application/json" hidden data-onchange="restore"></label><button class="btn ghost" data-act="install">${icon('download')} Instalar app</button></div>
-            <div class="row wrap"><button class="btn ghost" data-act="resetDemo">${icon('refresh')} Recarregar demonstração</button><button class="btn ghost" data-act="zerar" style="color:var(--crit)">${icon('trash')} Começar do zero</button></div>`}
-        </div>
-      </div>
-    </div>`);
-}
-
-function vMais() {
-  return shell('Mais', `<div class="card pad-0"><div class="list" style="padding:0 16px">${navItens().map(([h, ic, n]) => `<a class="li" href="${h}"><span class="avatar">${icon(ic)}</span><div class="grow t">${n}</div>${icon('arrowR', 'muted')}</a>`).join('')}
-    <a class="li" href="#" data-act="install"><span class="avatar">${icon('download')}</span><div class="grow t">Instalar na tela inicial</div></a>
-    <a class="li" href="#" data-act="atualizarApp"><span class="avatar">${icon('refresh')}</span><div class="grow"><div class="t">Procurar atualização</div><div class="s">Versão ${versaoApp()}</div></div></a>
-    <a class="li" href="#" data-act="logout"><span class="avatar">${icon('logout')}</span><div class="grow t">Sair</div></a></div></div>`);
-}
-
-// ---------- Registro de atividades (somente o dono) ----------
-// Quem fez o quê: cada gravação no banco gera um registro (gatilhos no Supabase) e cada entrada no app também.
-const atv = { chave: null, dados: null, carregando: false, erro: null, mais: false };
-const PERIODOS_ATV = [['hoje', 'Hoje', 0], ['7d', '7 dias', 6], ['30d', '30 dias', 29], ['tudo', 'Tudo', null]];
-const PAPEL = { dono: 'Dono', gestor: 'Gestor', parceiro: 'Parceiro' };
+const PAPEL = { dono: 'Dono', gestor: 'Gestor', usuario: 'Parceiro', parceiro: 'Parceiro', suporte: 'Suporte' };
 const CAMPOS = { nome: 'nome', codigo: 'código', pin: 'PIN', telefone: 'telefone', email: 'e-mail', contato: 'contato', cidade: 'cidade', cnpj: 'CNPJ', cicloDias: 'ciclo de acerto', prazoDias: 'prazo',
   formasPagamento: 'formas de pagamento', formaPadrao: 'forma padrão', garcons: 'equipe', precosCarta: 'preços de carta', ativo: 'ativo', preco: 'preço', precoCarta: 'preço de carta', estoqueMin: 'estoque mínimo',
   descricao: 'descrição', valor: 'valor', categoria: 'categoria', data: 'data', qtd: 'quantidade', obs: 'observação', status: 'status', itens: 'itens', vencimento: 'vencimento', formaPagamento: 'forma de pagamento',
@@ -1001,9 +880,9 @@ function descreverAtividade(s, x) {
   const C = (id) => esc(D.cliente(s, id)?.nome || 'parceiro');
   const atual = (lista) => (s[lista] || []).find((r) => r.id === x.registro) || {};
   const ks = camposMudados(x);
-  if (x.acao === 'acesso') return 'entrou no app';
+  if (x.acao === 'acesso') return null; // o núcleo descreve (inclui as aberturas do suporte)
   if (x.acao === 'zerou') return 'zerou a operação (parceiros, estoque, vendas, fechamentos e despesas apagados)';
-  switch (x.tabela) {
+  switch (x.colecao || x.tabela) {
     case 'movs': {
       const m = { ...atual('movs'), ...doc };
       const desc = `${(D.TIPOS_MOV[m.tipo]?.label || m.tipo || 'movimentação').toLowerCase()}: ${m.qtd} gf de ${P(m.produtoId)}${m.clienteId ? ' · ' + C(m.clienteId) : ''}${m.obs ? ` — “${esc(m.obs)}”` : ''}`;
@@ -1048,7 +927,7 @@ function descreverAtividade(s, x) {
       if (ks.includes('preco')) return `alterou o preço de <b>${nome}</b>: ${money(a.preco)} → ${money(d.preco)}${ks.length > 1 ? ' (e ' + listaCampos(ks.filter((k) => k !== 'preco')) + ')' : ''}`;
       return ks.length ? `alterou o rótulo <b>${nome}</b> (${listaCampos(ks)})` : '';
     }
-    case 'custos': return x.acao === 'update' ? `alterou o custo de <b>${P(x.registro)}</b>: ${money(a.custo)} → ${money(d.custo)}` : x.acao === 'insert' ? `definiu o custo de <b>${P(x.registro)}</b>: ${money(d.custo)}` : `removeu o custo de ${P(x.registro)}`;
+    case 'custos': { const pid = d.produtoId || a.produtoId || String(x.registro).replace(/^cu-/, ''); return x.acao === 'update' ? `alterou o custo de <b>${P(pid)}</b>: ${money(a.custo)} → ${money(d.custo)}` : x.acao === 'insert' ? `definiu o custo de <b>${P(pid)}</b>: ${money(d.custo)}` : `removeu o custo de ${P(pid)}`; }
     case 'despesas': {
       const dp = { ...atual('despesas'), ...doc };
       const desc = `${esc(dp.descricao || dp.categoria || 'despesa')} · ${money(dp.valor)}`;
@@ -1056,83 +935,13 @@ function descreverAtividade(s, x) {
     }
     case 'config': return ks.length ? `alterou os dados da empresa (${listaCampos(ks)})` : '';
     case 'perfis':
-      if (x.acao === 'insert') return doc.papel === 'parceiro' ? `conectou um aparelho ao app do parceiro ${C(doc.cliente_id)}` : `ativou um acesso de ${PAPEL[doc.papel]?.toLowerCase() || doc.papel}`;
-      if (x.acao === 'delete') return doc.papel === 'parceiro' ? `desconectou um aparelho do parceiro ${C(doc.cliente_id)}` : `removeu um acesso de ${PAPEL[doc.papel]?.toLowerCase() || doc.papel}`;
+      if (x.acao === 'insert') return ['parceiro', 'usuario'].includes(doc.papel) ? `conectou um aparelho ao app do parceiro ${C(doc.ref || doc.cliente_id)}` : `ativou um acesso de ${PAPEL[doc.papel]?.toLowerCase() || doc.papel}`;
+      if (x.acao === 'delete') return ['parceiro', 'usuario'].includes(doc.papel) ? `desconectou um aparelho do parceiro ${C(doc.ref || doc.cliente_id)}` : `removeu um acesso de ${PAPEL[doc.papel]?.toLowerCase() || doc.papel}`;
       return 'alterou um acesso';
   }
-  return `${{ insert: 'criou', update: 'alterou', delete: 'excluiu' }[x.acao] || x.acao} um registro em ${esc(x.tabela)}`;
+  return null; // o núcleo descreve (acessos, perfis…)
 }
 
-async function carregarAtividade(query = {}, { forcar = false, mais = false } = {}) {
-  if (store.modo !== 'nuvem') return;
-  const chave = JSON.stringify([query.u || '', query.p || '7d']);
-  if (!forcar && !mais && atv.chave === chave && (atv.dados || atv.carregando)) return pintarAtividade();
-  if (atv.carregando) return;
-  atv.carregando = true; atv.erro = null;
-  if (!mais) { atv.chave = chave; atv.dados = null; pintarAtividade(); }
-  const dias = PERIODOS_ATV.find(([v]) => v === (query.p || '7d'))?.[2];
-  const desde = dias == null ? null : new Date(addDays(today(), -dias) + 'T00:00:00').toISOString();
-  const ult = mais ? atv.dados.itens[atv.dados.itens.length - 1]?.em : null;
-  try {
-    const r = await store.rpc('atividade_log', { p_antes: ult, p_user: query.u || null, p_desde: desde, p_limite: 300 });
-    if (mais) atv.dados.itens.push(...r.itens); else atv.dados = r;
-    atv.mais = r.itens.length === 300;
-  } catch (e) { atv.erro = e.message; }
-  atv.carregando = false;
-  if (current.pattern === '/atividade') pintarAtividade();
-}
-
-function pintarAtividade() {
-  const el = document.getElementById('atividade');
-  if (!el) return;
-  if (atv.erro) { el.innerHTML = `<div class="card small">Não foi possível carregar o registro: ${esc(atv.erro)}<br><span class="muted">Se for a primeira vez, rode novamente o <b>supabase/instalar.sql</b> no Supabase (SQL Editor) para criar o registro de atividades.</span></div>`; return; }
-  if (!atv.dados) { el.innerHTML = '<div class="card small muted">Carregando…</div>'; return; }
-  const s = S();
-  // ações seguidas da mesma pessoa, no mesmo tipo de registro, em poucos minutos viram uma linha só
-  const linhas = [];
-  for (const x of atv.dados.itens) {
-    const txt = descreverAtividade(s, x);
-    if (!txt) continue;
-    const ant = linhas[linhas.length - 1];
-    if (ant && ant.userId === x.userId && ant.tabela === x.tabela && ant.acao === x.acao && x.acao !== 'acesso' && diaAtv(ant.em) === diaAtv(x.em) && new Date(ant.ultimoEm) - new Date(x.em) < 3 * 60000) { ant.itens.push({ x, txt }); ant.ultimoEm = x.em; continue; }
-    linhas.push({ ...x, ultimoEm: x.em, itens: [{ x, txt }] });
-  }
-  atv.linhas = linhas;
-  const porDia = Object.entries(linhas.reduce((m, l) => ((m[diaAtv(l.em)] ||= []).push(l), m), {}));
-  const nomeDia = (d) => d === today() ? 'Hoje' : d === addDays(today(), -1) ? 'Ontem' : new Date(d + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' }).replace(/^./, (c) => c.toUpperCase());
-  el.innerHTML = porDia.length ? porDia.map(([dia, ls]) => `<div class="card pad-0 mt"><div style="padding:14px 16px 0"><h2>${nomeDia(dia)}</h2></div><div class="list" style="padding:0 16px">
-      ${ls.map((l) => `<div class="li" ${l.itens.length > 1 ? `data-act="atvGrupo" data-i="${linhas.indexOf(l)}" style="cursor:pointer"` : ''} data-busca="${esc((l.quem || '') + ' ' + l.itens.map((it) => it.txt.replace(/<[^>]+>/g, '')).join(' '))}">
-        <div class="avatar" title="${esc(l.quem || '')}">${l.acao === 'acesso' ? icon('logout') : esc(iniciais(nomeCurto(l)))}</div>
-        <div class="grow"><div class="t"><b>${esc(nomeCurto(l))}</b> ${l.itens[0].txt}${l.itens.length > 1 ? ` <span class="badge">+${l.itens.length - 1}</span>` : ''}</div>
-          <div class="s">${l.itens.length > 1 ? horaAtv(l.itens[l.itens.length - 1].x.em) + ' – ' : ''}${horaAtv(l.em)} · ${PAPEL[l.papel] || 'Sistema'}${l.papel !== 'parceiro' && l.quem?.includes('@') ? ' · ' + esc(l.quem) : ''}</div></div></div>`).join('')}</div></div>`).join('')
-    + (atv.mais ? `<div class="center mt"><button class="btn ghost" data-act="atvMais" ${atv.carregando ? 'disabled' : ''}>Carregar mais</button></div>` : '')
-    : `<div class="mt">${empty('Nenhuma atividade no período.', 'clock')}</div>`;
-  const pessoas = document.getElementById('atvPessoas');
-  if (pessoas) {
-    const q = current.params.query || {};
-    const link = (u) => `#/atividade?${new URLSearchParams({ ...(u ? { u } : {}), p: q.p || '7d' })}`;
-    pessoas.innerHTML = `<div class="chips"><a class="chip ${!q.u ? 'on' : ''}" href="${link('')}">Todos</a>${atv.dados.pessoas.map((p) => `<a class="chip ${q.u === p.userId ? 'on' : ''}" href="${link(p.userId)}" title="${esc(p.quem || '')}">${esc(nomeCurto(p))} <span class="${q.u === p.userId ? '' : 'muted'}">· ${PAPEL[p.papel] || ''}</span></a>`).join('')}</div>
-      <div class="list mt-s">${atv.dados.pessoas.filter((p) => p.papel !== 'parceiro').map((p) => `<div class="li"><div class="avatar">${esc(iniciais(nomeCurto(p)))}</div><div class="grow"><div class="t">${esc(p.quem || '?')}</div><div class="s">${PAPEL[p.papel] || ''} · ${plural(p.acoes, 'ação', 'ações')} e ${plural(p.acessos, 'acesso')} em 30 dias</div></div><div class="small muted r">último uso<br><b>${diaAtv(p.ultimo) === today() ? 'hoje' : date(diaAtv(p.ultimo))} ${horaAtv(p.ultimo)}</b></div></div>`).join('')}</div>`;
-  }
-  if (buscas[current.pattern]) filtrarBusca(app, buscas[current.pattern]);
-}
-
-function vAtividade({ query }) {
-  if (!store.ehDono() && store.modo === 'nuvem') return shell('Atividade', empty('Somente o dono vê o registro de atividades.', 'users'));
-  const k = query.p || '7d';
-  handlers = {
-    atvMais: () => carregarAtividade(query, { mais: true }),
-    atvRecarregar: () => carregarAtividade(query, { forcar: true }),
-    atvGrupo: (el) => { const l = atv.linhas[+el.dataset.i]; modal({ title: esc(nomeCurto(l)) + ' · ' + horaAtv(l.em), body: `<div class="list">${l.itens.map(({ x, txt }) => `<div class="li"><div class="grow"><div class="t">${txt}</div><div class="s">${horaAtv(x.em)}</div></div></div>`).join('')}</div>` }); },
-  };
-  const link = (p) => `#/atividade?${new URLSearchParams({ ...(query.u ? { u: query.u } : {}), p })}`;
-  return shell('Atividade', `
-    ${pageHead('Atividade', 'O que cada pessoa fez no sistema: gestores, sócios e parceiros. Só você (dono) vê esta tela.', `${busca('Buscar pessoa, parceiro, rótulo…')}<button class="btn ghost" data-act="atvRecarregar">${icon('refresh')} Atualizar</button>`)}
-    ${store.modo !== 'nuvem' ? empty('O registro de atividades funciona com o banco na nuvem (não na demonstração).', 'users') : `
-    <div class="card col"><h2>Quem usou nos últimos 30 dias</h2><div id="atvPessoas" class="small muted">Carregando…</div></div>
-    <div class="seg mt" style="max-width:100%;overflow-x:auto">${PERIODOS_ATV.map(([v, n]) => `<button class="${k === v ? 'on' : ''}" data-act="goto" data-h="${link(v)}">${n}</button>`).join('')}</div>
-    <div id="atividade"></div>`}`);
-}
 
 // ---------- Documentos para imprimir ----------
 function docHead(titulo, sub) {
@@ -1190,101 +999,8 @@ function vImprimirRomaneio({ cid, query }) {
     <div class="sign"><div>Mil Terras</div><div>${esc(c.nome)} — recebido em ___/___/______</div></div>${docFoot()}`, { back: true });
 }
 
-// ---------- Login ----------
-let telaLogin = 'entrar';
-function vLogin() {
-  if (store.modo === 'local') return `<div class="login"><form class="box col" data-onsubmit="login" style="gap:16px">
-    <img class="logo" src="${asset('assets/logo/logo_v.png')}" alt="Mil Terras">
-    <div class="center"><div class="label">Gestão · demonstração</div><div class="small muted mt-s">Digite seu PIN para entrar</div></div>
-    <div class="pin">${[0, 1, 2, 3].map((i) => `<input inputmode="numeric" maxlength="1" name="p${i}" data-oninput="pin" autocomplete="off" ${i === 0 ? 'autofocus' : ''}>`).join('')}</div>
-    <button class="btn lg block">Entrar</button>
-    <div class="tiny muted center">${S().meta.demo ? 'Demonstração: PIN 0000 · dados fictícios, só neste navegador' : 'PIN padrão 0000'}</div></form></div>`;
-  const logo = `<img class="logo" src="${asset('assets/logo/logo_v.png')}" alt="Mil Terras">`;
-  if (telaLogin === 'ativar') return `<div class="login"><form class="box col" data-onsubmit="ativar" style="gap:14px">${logo}
-    <div class="center"><div class="label">Ativar acesso de gestor</div><div class="small muted mt-s">Informe o código de convite que você recebeu (ou o código de instalação, no primeiro acesso do dono).</div></div>
-    <label class="field"><span>Código</span><input class="input" name="codigo" required autocapitalize="characters" style="text-transform:uppercase"></label>
-    <button class="btn lg block">Ativar</button><a href="#" class="small center" data-act="logout">Usar outra conta</a></form></div>`;
-  const novo = telaLogin === 'novo';
-  return `<div class="login"><form class="box col" data-onsubmit="${novo ? 'cadastrar' : 'entrar'}" style="gap:14px">${logo}
-    <div class="center"><div class="label">Gestão</div></div>
-    <div class="seg" style="align-self:center"><button type="button" class="${novo ? '' : 'on'}" data-act="telaLogin" data-v="entrar">Entrar</button><button type="button" class="${novo ? 'on' : ''}" data-act="telaLogin" data-v="novo">Primeiro acesso</button></div>
-    <label class="field"><span>E-mail</span><input class="input" name="email" type="email" autocomplete="username" required></label>
-    <label class="field"><span>Senha${novo ? ' (mínimo 8 caracteres)' : ''}</span><input class="input" name="senha" type="password" minlength="${novo ? 8 : 1}" autocomplete="${novo ? 'new-password' : 'current-password'}" required></label>
-    ${novo ? '<label class="field"><span>Código de instalação ou de convite</span><input class="input" name="codigo" required style="text-transform:uppercase"></label>' : ''}
-    <button class="btn lg block">${novo ? 'Criar acesso' : 'Entrar'}</button>
-    ${novo ? '' : '<a href="#" class="small center" data-act="esqueci">Esqueci minha senha</a>'}
-    <a class="tiny muted center" href="?demo=1">Ver demonstração com dados fictícios</a></form></div>`;
-}
-
-// ---------- Render ----------
-const ROUTES = [
-  ['/painel', vPainel], ['/aovivo', vAoVivo], ['/estoque', vEstoque], ['/consignacao', vConsignacao], ['/remessas', vRemessas], ['/parceiros', vParceiros], ['/parceiro/:id', vParceiro],
-  ['/fechamentos', vFechamentos], ['/fechamento/:id', vFechamento], ['/novo-fechamento/:cid', vNovoFechamento], ['/financeiro', vFinanceiro],
-  ['/inteligencia', vInteligencia], ['/produtos', vProdutos], ['/produto/:id', vProduto], ['/atividade', vAtividade], ['/config', vConfig], ['/mais', vMais],
-  ['/imprimir/fechamento/:id', vImprimirFechamento], ['/imprimir/romaneio/:cid', vImprimirRomaneio],
-];
-
-function render(view, params, pattern) {
-  current = { view, params, pattern };
-  handlers = {};
-  resetCharts();
-  const logged = store.modo === 'local' ? localStorage.getItem(SESSION) : store.ehGestor() && S();
-  if (!logged && store.modo === 'nuvem' && store.perfil()) telaLogin = 'ativar';
-  app.innerHTML = logged ? view(params) : vLogin();
-  if (logged && buscas[pattern]) filtrarBusca(app, buscas[pattern]);
-  if (logged && pattern === '/config' && store.modo === 'nuvem') carregarEquipe();
-  if (logged && pattern === '/atividade') carregarAtividade(params.query);
-  mountCharts(app);
-  if (!logged) app.querySelector('[name=p0]')?.focus();
-}
-function rerender() { const y = scrollY; render(current.view, current.params, current.pattern); scrollTo(0, y); }
-const go = router(ROUTES, render);
-
-const common = {
-  goto: (el) => (location.hash = el.dataset.h),
-  eaiAbrir: () => ia.abrir(),
-  eaiMais: () => ia.menuMais(maisGestor(current.pattern, current.params).map((x) => ({ ...x, icone: icon(x.icone) })), { aoEscolher: escolherMais }),
-  busca: (el) => { buscas[current.pattern] = el.value; filtrarBusca(app, el.value); },
-  step: stepHandler,
-  qty: () => {},
-  back: () => history.length > 1 ? history.back() : (location.hash = '#/painel'),
+const acoes = {
   print: () => window.print(),
-  logout: async () => { ia.limpar(); localStorage.removeItem(SESSION); telaLogin = 'entrar'; await store.sair(); go(); },
-  telaLogin: (el) => { telaLogin = el.dataset.v; go(); },
-  entrar: async (f) => {
-    const fd = new FormData(f); const btn = f.querySelector('button.lg'); btn.disabled = true;
-    try { const ok = await store.entrarGestor(fd.get('email').trim(), fd.get('senha')); if (!ok) telaLogin = 'ativar'; else { await aposEntrar(); if (!location.hash || location.hash === '#/') location.hash = '#/painel'; } go(); }
-    catch (e) { toast(e.message); btn.disabled = false; }
-  },
-  cadastrar: async (f) => {
-    const fd = new FormData(f); const btn = f.querySelector('button.lg'); btn.disabled = true;
-    try {
-      let sessao;
-      try { sessao = await store.cadastrarGestor(fd.get('email').trim(), fd.get('senha')); }
-      catch (e) {
-        if (!/already|registered/i.test(e.message)) throw e;
-        if (await store.entrarGestor(fd.get('email').trim(), fd.get('senha'))) { location.hash = '#/painel'; go(); return; } // já era gestor
-        sessao = true; // conta existe e a senha confere: falta só ativar
-      }
-      if (!sessao) { modal({ title: 'Confirme seu e-mail', body: '<p>Enviamos um link de confirmação para o seu e-mail. Abra o link, volte aqui, entre com e-mail e senha e informe o código de instalação.</p>' }); telaLogin = 'entrar'; go(); return; }
-      await store.ativarGestor(String(fd.get('codigo')));
-      await aposEntrar(); location.hash = '#/painel'; go();
-    } catch (e) { toast(e.message); btn.disabled = false; if (store.perfil() === null) { telaLogin = 'ativar'; go(); } }
-  },
-  ativar: async (f) => {
-    try { await store.ativarGestor(new FormData(f).get('codigo')); await aposEntrar(); location.hash = '#/painel'; go(); } catch (e) { toast(e.message); }
-  },
-  esqueci: () => modal({ title: 'Recuperar senha', body: '<form id="fes" class="col"><label class="field"><span>E-mail</span><input class="input" name="email" type="email" required></label></form>', foot: '<button class="btn" data-act="ok">Enviar link</button>',
-    handlers: { ok: async () => { const email = new FormData(document.getElementById('fes')).get('email'); if (!email) return; await store.redefinirSenha(email); closeModal(); toast('Se o e-mail existir, você receberá um link.'); } } }),
-  install: instalar,
-  atualizarApp: () => verificarAtualizacao(true),
-  semBanner: () => { dispensarBanner(); rerender(); },
-  pin: (el) => { el.value = el.value.replace(/\D/g, ''); if (el.value) el.nextElementSibling?.focus(); const f = el.form; if ([...f.querySelectorAll('input')].every((i) => i.value)) f.requestSubmit(); },
-  login: (f) => {
-    const pin = [...f.querySelectorAll('input')].map((i) => i.value).join('');
-    if (pin === S().meta.pinGestor.slice(0, 4)) { localStorage.setItem(SESSION, '1'); if (!location.hash || location.hash === '#/') location.hash = '#/painel'; go(); }
-    else { toast('PIN incorreto'); f.querySelectorAll('input').forEach((i) => (i.value = '')); f.querySelector('input').focus(); }
-  },
   mov: (el) => modalMov(el.dataset.t),
   remessa: (el) => modalRemessa(el.dataset.c),
   devolucao: (el) => modalRemessa(el.dataset.c, 'devolucao'),
@@ -1294,9 +1010,6 @@ const common = {
     const id = f.dataset.id;
     const formas = fd.getAll('forma');
     if (!formas.length) return toast('Libere ao menos uma forma de pagamento');
-    let cod = String(fd.get('codigo') || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10);
-    if (!cod || S().clientes.some((c) => c.id !== id && c.codigo === cod)) cod = gerarCodigo();
-    if (!/^\d{4}$/.test(String(fd.get('pin')))) return toast('O PIN precisa ter 4 números');
     let nid = id;
     store.commit((st) => {
       let c = id ? D.cliente(st, id) : null;
@@ -1305,26 +1018,26 @@ const common = {
       for (const g of c.garcons) g.ativo = nomes.includes(g.nome);
       for (const n of nomes) if (!c.garcons.some((g) => g.nome === n)) c.garcons.push({ id: uid('g'), nome: n, ativo: true });
       Object.assign(c, { nome: fd.get('nome'), tipo: fd.get('tipo'), cidade: fd.get('cidade'), regiao: fd.get('regiao'), contato: fd.get('contato'), telefone: fd.get('telefone'), email: fd.get('email'), cnpj: fd.get('cnpj'),
-        cicloDias: +fd.get('cicloDias') || 15, prazoDias: +fd.get('prazoDias') || 0, formasPagamento: formas, formaPadrao: formas.includes(c.formaPadrao) || (c.formaPadrao?.startsWith('cond:') && D.condicao(c, c.formaPadrao.slice(5))) ? c.formaPadrao : formas[0],
-        codigo: cod, pin: String(fd.get('pin')).slice(0, 4) });
+        cicloDias: +fd.get('cicloDias') || 15, prazoDias: +fd.get('prazoDias') || 0, formasPagamento: formas, formaPadrao: formas.includes(c.formaPadrao) || (c.formaPadrao?.startsWith('cond:') && D.condicao(c, c.formaPadrao.slice(5))) ? c.formaPadrao : formas[0] });
       if (id) c.ativo = !!fd.get('ativo');
     });
     closeModal(); toast('Parceiro salvo');
-    if (!id && typeof onSalvo === 'function') { toast('Parceiro cadastrado — envie o acesso depois em Configurações'); return onSalvo(nid); }
-    if (!id) {
-      location.hash = `#/parceiro/${nid}`;
-      setTimeout(() => {
-        const c = D.cliente(S(), nid);
-        const base = new URL('../cliente/' + DEMO_Q, location.href).href;
-        modal({ title: 'Parceiro cadastrado', body: `<p class="small">Envie o acesso ao app para <b>${esc(c.nome)}</b>: link, código <b>${esc(c.codigo)}</b> e PIN <b>${esc(c.pin)}</b>, com o passo a passo para instalar no celular.</p>`,
-          foot: `<a class="btn ghost" target="_blank" rel="noopener" href="${waLink(c.telefone, msgAcesso(c, base))}">${icon('whatsapp')} WhatsApp</a>${c.email ? `<a class="btn ghost" href="${mailAcesso(c, base)}">E-mail</a>` : ''}<button class="btn ghost" data-act="copiarAcesso" data-c="${c.id}">Copiar mensagem</button><button class="btn" data-act="primRem">${icon('truck')} Primeira remessa</button>`,
-          handlers: { primRem: () => { closeModal(); modalRemessa(nid); }, copiarAcesso: common.copiarAcesso } });
-      }, 300);
-    }
+    if (id) { const c = D.cliente(S(), id); store.acessos.renomear(id, c.nome).catch(() => {}); return; }
+    // parceiro novo: já gera o acesso ao app (código + PIN)
+    const acesso = store.acessos.criar(nid, D.cliente(S(), nid).nome).catch((e) => { toast('Acesso não gerado: ' + e.message); return null; });
+    if (typeof onSalvo === 'function') { toast('Parceiro cadastrado — envie o acesso depois em Configurações'); return onSalvo(nid); }
+    location.hash = `#/parceiro/${nid}`;
+    acesso.then((a) => {
+      const c = D.cliente(S(), nid);
+      if (!a || !c) return;
+      modal({ title: 'Parceiro cadastrado', body: `<p class="small">Envie o acesso ao app para <b>${esc(c.nome)}</b>: link, código <b>${esc(a.codigo)}</b> e PIN <b>${esc(a.pin)}</b>, com o passo a passo para instalar no celular.</p>`,
+        foot: `<a class="btn ghost" target="_blank" rel="noopener" href="${waLink(c.telefone, msgAcesso(c, a))}">${icon('whatsapp')} WhatsApp</a>${c.email ? `<a class="btn ghost" href="${mailAcesso(c, a)}">E-mail</a>` : ''}<button class="btn ghost" data-act="copiarAcessoParceiro" data-c="${c.id}">Copiar mensagem</button><button class="btn" data-act="primRem">${icon('truck')} Primeira remessa</button>`,
+        handlers: { primRem: () => { closeModal(); modalRemessa(nid); }, copiarAcessoParceiro: acoes.copiarAcessoParceiro } });
+    });
   },
   novoFech: () => modal({ title: 'Fechamento de qual parceiro?', body: `<div class="list">${S().clientes.filter((c) => c.ativo).map((c) => { const per = D.periodoAtual(S(), c.id); return `<a class="li" href="${per.pendente ? '#/fechamento/' + per.pendente.id : '#/novo-fechamento/' + c.id}" data-act="close"><div class="avatar">${iniciais(c.nome)}</div><div class="grow"><div class="t">${esc(c.nome)}</div><div class="s">${per.pendente ? 'Enviado pelo parceiro — conferir' : 'Previsto ' + date(per.previsto)}</div></div></a>`; }).join('')}
     <a class="li" href="#" data-act="novoParcFech"><div class="avatar">${icon('plus')}</div><div class="grow t">Cadastrar novo parceiro</div></a></div>`,
-    handlers: { close: (el) => { closeModal(); if (el.getAttribute?.('href')) location.hash = el.getAttribute('href'); }, novoParcFech: () => { closeModal(); novoParceiro((nid) => (location.hash = '#/novo-fechamento/' + nid), () => common.novoFech()); } } }),
+    handlers: { close: (el) => { closeModal(); if (el.getAttribute?.('href')) location.hash = el.getAttribute('href'); }, novoParcFech: () => { closeModal(); novoParceiro((nid) => (location.hash = '#/novo-fechamento/' + nid), () => acoes.novoFech()); } } }),
   aprovar: (el) => {
     const form = document.getElementById('frepo');
     const s = S();
@@ -1396,31 +1109,14 @@ const common = {
     download(`milterras-vendas-${today()}.csv`, toCSV(rows), 'text/csv');
   },
   editProduto: (el) => modalProduto(el.dataset.id),
-  convidar: () => modal({ title: 'Convidar gestor', body: '<form id="fconv" class="col"><label class="field"><span>Nome de quem vai receber (opcional)</span><input class="input" name="nome" placeholder="Ex.: Sócio"></label><div class="tiny muted">Será gerado um código de uso único, válido por 7 dias.</div></form>',
-    foot: '<button class="btn ghost" data-act="close">Cancelar</button><button class="btn" data-act="ok">Gerar convite</button>',
-    handlers: { ok: async () => {
-      try {
-        const codigo = await store.rpc('criar_convite', { p_nome: new FormData(document.getElementById('fconv')).get('nome') });
-        const base = new URL('../gestor/', location.href).href;
-        modal({ title: 'Convite criado', body: `<div class="center"><div class="label">Código</div><div style="font-family:var(--font-t);font-size:30px;letter-spacing:.08em;color:var(--bordo)">${codigo}</div></div><p class="small">Envie o link e o código. A pessoa abre a Gestão, toca em <b>Primeiro acesso</b>, cria e-mail e senha e informa o código.</p>`,
-          foot: `<a class="btn" target="_blank" rel="noopener" href="${waLink('', msgConvite(codigo, base))}">${icon('whatsapp')} Enviar pelo WhatsApp</a>` });
-        carregarEquipe();
-      } catch (e) { toast(e.message); }
-    } } }),
-  removerGestor: (el) => confirmar(`Remover o acesso de <b>${el.dataset.e}</b> à Gestão?`, { ok: 'Remover' }).then(async (y) => { if (!y) return; try { await store.rpc('remover_gestor', { p_user: el.dataset.u }); toast('Acesso removido'); carregarEquipe(); } catch (e) { toast(e.message); } }),
-  cancelarConvite: (el) => store.rpc('cancelar_convite', { p_codigo: el.dataset.c }).then(() => { toast('Convite cancelado'); carregarEquipe(); }).catch((e) => toast(e.message)),
   consigDet: (el) => modalConsig(el.dataset.c),
   ondeEsta: (el) => modalOndeEsta(el.dataset.p),
   abrirApp: (el) => window.open(urlApp(el.dataset.c), '_blank', 'noopener'),
-  novoCodigo: (el) => {
-    const inp = el.parentElement.querySelector('input');
-    const editando = el.closest('form')?.dataset.id;
-    const trocar = () => { inp.value = gerarCodigo(); toast(`Novo código: ${inp.value}${editando ? ' (salve para valer)' : ''}`); };
-    if (editando) confirmar('Gerar um novo código? Depois de salvar, os aparelhos do parceiro serão desconectados e ele precisará do novo código.', { ok: 'Gerar novo' }).then((y) => y && trocar()); else trocar();
-  },
-  copiarAcesso: (el) => {
+  copiarAcessoParceiro: async (el) => {
     const c = D.cliente(S(), el.dataset.c);
-    const txt = msgAcesso(c, new URL('../cliente/' + DEMO_Q, location.href).href);
+    const a = await acessoDe(c.id);
+    if (!a) return toast('Gere o acesso em Configurações › Acesso dos parceiros');
+    const txt = msgAcesso(c, a);
     (navigator.clipboard?.writeText(txt) || Promise.reject()).then(() => toast('Mensagem copiada — cole no e-mail ou WhatsApp'), () => modal({ title: 'Copie a mensagem', body: `<textarea class="input" style="min-height:220px">${esc(txt)}</textarea>` }));
   },
   aprovarPedido: (el) => {
@@ -1483,14 +1179,8 @@ const common = {
     toast(`Remessa: ${D.STATUS_ENTREGA[st].label}`);
   },
   voltarRem: (el) => { store.commit((s2) => D.avancarRemessa(s2, el.dataset.id, el.dataset.st)); toast(`Remessa voltou para: ${D.STATUS_ENTREGA[el.dataset.st].label}`); },
-  salvarEmpresa: (f) => { const fd = Object.fromEntries(new FormData(f)); store.commit((st) => Object.assign(st.meta, fd)); toast('Dados salvos'); },
-  backup: () => download(`milterras-backup-${today()}.json`, store.exportJSON()),
-  restore: (el) => { const file = el.files[0]; if (!file) return; file.text().then((t) => { try { store.importJSON(t); toast('Backup restaurado'); } catch (e) { toast('Arquivo inválido'); } }); },
-  resetDemo: () => confirmar('Recarregar os dados de demonstração? Tudo o que foi lançado neste navegador será substituído.', { ok: 'Recarregar' }).then((y) => { if (y) { store.reset(); toast('Demonstração recarregada'); } }),
-  zerar: () => confirmar('Apagar parceiros, movimentações e financeiro fictícios, mantendo apenas o catálogo de 14 rótulos? Use para começar a operação real.', { ok: 'Começar do zero' }).then((y) => { if (y) { store.importJSON(JSON.stringify(seed({ vazio: true }))); toast('Pronto! Cadastre a primeira entrada de estoque.'); location.hash = '#/estoque'; } }),
 };
 
-delegate(app, new Proxy({}, { get: (_, k) => handlers[k] || common[k] }));
 // Recomendações por parceiro calculadas aqui (o gestor vê toda a rede) e gravadas no cadastro,
 // para o app do parceiro sugerir novos rótulos sem acesso aos dados dos outros parceiros.
 async function aposEntrar() {
@@ -1507,27 +1197,49 @@ async function aposEntrar() {
   if (Object.keys(novas).length) store.commit((st) => { for (const [cid, r] of Object.entries(novas)) D.cliente(st, cid).recomendados = r; });
 }
 
-store.subscribe((s, msg, externo) => {
-  if (!S() || !current.view) return; // ainda carregando
-  if (externo && msg === 'fechamento') toast('Novo fechamento recebido de um parceiro');
-  if (externo && msg === 'pedidos') toast('Novo pedido de reposição recebido');
-  if (current.pattern === '/novo-fechamento/:cid' && externo) return;
-  if (document.querySelector('.overlay') && externo) return; // não fechar formulários abertos
-  rerender();
+const A = criarApp({
+  tipo: 'gestao',
+  inicio: '#/painel',
+  nav: NAV,
+  tabs: TABS,
+  badges: (s) => {
+    const pend = s.fechamentos.filter((f) => f.status === 'enviado').length;
+    const remPend = D.remessas(s).filter((r) => r.status !== 'entregue').length + D.pedidos(s).filter((p) => p.status === 'solicitado').length;
+    return { '#/fechamentos': pend, '#/remessas': remPend };
+  },
+  ativo: (h, route) => (h === '#/parceiros' && route.startsWith('#/parceiro')) || (h === '#/fechamentos' && (route.startsWith('#/fechamento') || route.startsWith('#/novo-fechamento'))) || (h === '#/produtos' && route.startsWith('#/produto')),
+  topoDireita: (s) => { const pend = s.fechamentos.filter((f) => f.status === 'enviado').length; return `<a href="#/fechamentos" style="color:#fff;position:relative" aria-label="Fechamentos para conferir">${icon('inbox')}${pend ? `<span class="badge dot" style="position:absolute;top:-6px;right:-8px">${pend}</span>` : ''}</a>`; },
+  rotas: [
+    ['/painel', vPainel], ['/aovivo', vAoVivo], ['/estoque', vEstoque], ['/consignacao', vConsignacao], ['/remessas', vRemessas], ['/parceiros', vParceiros], ['/parceiro/:id', vParceiro],
+    ['/fechamentos', vFechamentos], ['/fechamento/:id', vFechamento], ['/novo-fechamento/:cid', vNovoFechamento], ['/financeiro', vFinanceiro],
+    ['/inteligencia', vInteligencia], ['/produtos', vProdutos], ['/produto/:id', vProduto],
+    ['/imprimir/fechamento/:id', vImprimirFechamento], ['/imprimir/romaneio/:cid', vImprimirRomaneio],
+  ].map(([p, v]) => [p, (params) => { handlers = {}; return v(params); }]),
+  camposEmpresa: [['whatsapp', 'WhatsApp (com DDI e DDD)', '5554999999999'], ['instagram', 'Instagram', '@milterras']],
+  mais: (rota, params) => maisGestor(rota, params),
+  sugestoes: (rota) => ({
+    '/painel': ['Como foi este mês comparado com o anterior?', 'Quais parceiros mais venderam este mês?'],
+    '/aovivo': ['O que mais vendeu hoje?'],
+    '/estoque': ['Quais rótulos estão acabando no estoque central?', 'Quanto vale o estoque central a preço de parceiro?'],
+    '/consignacao': ['Qual parceiro tem mais garrafas paradas?', 'Quanto tenho em consignação no total?'],
+    '/remessas': ['Quais remessas ainda não foram entregues?'],
+    '/parceiros': ['Quais parceiros estão com o fechamento atrasado?', 'Qual parceiro vende mais por mês?'],
+    '/parceiro/:id': ['Como está este parceiro: vendas, estoque e pagamentos?'],
+    '/fechamentos': ['Quais fechamentos estão aguardando aprovação?'],
+    '/financeiro': ['Quem está devendo e há quantos dias?', 'Onde estou gastando mais?'],
+    '/inteligencia': ['Que rótulos devo repor em cada parceiro?'],
+    '/produtos': ['Qual rótulo dá mais margem?', 'Quais rótulos venderam menos nos últimos 60 dias?'],
+  }[rota] || []),
+  iaExtras: (s) => extrasGestao(s),
+  descreverAtividade: (x, s) => descreverAtividade(s, x),
+  aposEntrar,
+  aoMudar: (msg, externo, info) => {
+    if (!externo || !info) return;
+    if (info.colecao === 'fechamentos' && info.doc.status === 'enviado' && info.antes?.status !== 'enviado') toast('Novo fechamento recebido de um parceiro');
+    if (info.colecao === 'pedidos' && info.novo) toast('Novo pedido de reposição recebido');
+  },
+  naoRedesenhar: (rota, externo) => rota === '/novo-fechamento/:cid' && externo,
+  acoes: new Proxy({}, { get: (_, k) => handlers[k] || acoes[k] }),
 });
-store.onErro((m) => toast('Não foi possível salvar: ' + m));
-store.onRecuperacao(() => modal({ title: 'Criar nova senha', body: '<form id="fns" class="col"><label class="field"><span>Nova senha (mínimo 8 caracteres)</span><input class="input" name="senha" type="password" minlength="8" autocomplete="new-password"></label></form>',
-  foot: '<button class="btn" data-act="ok">Salvar senha</button>',
-  handlers: { ok: async () => { const v = new FormData(document.getElementById('fns')).get('senha'); if (String(v).length < 8) return toast('Mínimo 8 caracteres'); try { await store.novaSenha(v); closeModal(); toast('Senha alterada'); } catch (e) { toast(e.message); } } } }));
-store.onStatus(() => { const el = document.querySelector('.side .foot .sync'); if (el) el.outerHTML = syncBadge(); });
-registerSW();
-app.innerHTML = `<div class="login"><img src="${asset('assets/logo/logo_v_negativo.png')}" alt="Mil Terras" style="width:200px;opacity:.9"></div>`;
-// Retorno de link de e-mail com erro (ex.: link expirado): mostra explicação em vez de uma tela quebrada
-const erroLink = new URLSearchParams(location.hash.replace(/^#\/?/, '')).get('error_code');
-if (erroLink) history.replaceState(null, '', location.pathname + location.search);
-store.init('gestor').then(async (ok) => {
-  if (ok) await aposEntrar();
-  go();
-  if (erroLink) modal({ title: 'Link inválido ou expirado', body: `<p class="small">O link do e-mail já foi usado ou expirou${erroLink === 'otp_expired' ? ' (alguns provedores de e-mail abrem o link antes de você para verificar segurança)' : ''}.</p>
-    <p class="small">Tente <b>entrar</b> com seu e-mail e senha: se a confirmação tiver funcionado, você entra normalmente. Se aparecer "Confirme o e-mail", use <b>Primeiro acesso</b> de novo para receber outro link.</p>` });
-});
+
+A.iniciar();

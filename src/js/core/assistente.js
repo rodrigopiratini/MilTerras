@@ -1,4 +1,3 @@
-// Cópia de easyapp-base/src/js/core/assistente.js (o núcleo da fábrica): mude lá e copie para cá.
 // Assistente (IA) dos apps da fábrica: o chat ✦ e o botão + de cada tela.
 // Não depende do resto do núcleo (o Mil Terras usa este mesmo arquivo): quem cria passa um adaptador.
 //

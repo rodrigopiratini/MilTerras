@@ -3,8 +3,8 @@
 // "Começar do zero" para apagar a simulação e manter apenas o catálogo.
 
 import { PRODUTOS } from './catalogo.js';
-import { addDays, today, uid, diffDays, parse } from './fmt.js';
-import * as D from './domain.js';
+import { addDays, today, uid, diffDays, parse } from './core/fmt.js';
+import * as D from './dominio.js';
 
 const CLIENTES = [
   { nome: 'Trattoria Bella Serra', tipo: 'Restaurante', cidade: 'Gramado', regiao: 'Serra Gaúcha', porte: 1.6, inicio: 178, codigo: 'BELLA',
@@ -40,10 +40,10 @@ const DIA_SEMANA = [1.3, 0.45, 0.6, 0.75, 0.95, 1.6, 1.9]; // dom..sáb
 
 function rng(seed) { let a = seed; return () => { a |= 0; a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
 
-export function seed({ vazio = false } = {}) {
+function seedBase({ vazio = false } = {}) {
   const T = today();
   const s = {
-    meta: { versao: 1, criadoEm: new Date().toISOString(), demo: !vazio, empresa: 'Mil Terras', whatsapp: '5554991165105', instagram: '@milterrasvinhos', pinGestor: '0000' },
+    meta: { versao: 1, criadoEm: new Date().toISOString(), demo: !vazio, empresa: 'Mil Terras', whatsapp: '5554991165105', instagram: '@milterrasvinhos', pinGestao: '0000' },
     produtos: PRODUTOS.map((p) => ({ ...p })),
     clientes: [], movs: [], vendas: [], fechamentos: [], despesas: [], pedidos: [],
   };
@@ -175,5 +175,15 @@ export function seed({ vazio = false } = {}) {
   D.criarPedido(s, { clienteId: 'cl2', itens: [{ produtoId: 'rufia', qtd: 4 }, { produtoId: 'barolo', qtd: 2 }], obs: 'Evento de vinhos na sexta' }).data = addDays(T, -1);
   for (const c of s.clientes) delete c._porte;
   D.migrarProtocolos(s);
+  return s;
+}
+
+// Formato do molde: custo em "custos" (só a gestão vê) e código + PIN dos parceiros em "acessos"
+export function seed(opcoes) {
+  const s = seedBase(opcoes);
+  s.custos = s.produtos.map((p) => ({ id: 'cu-' + p.id, produtoId: p.id, custo: p.custo || 0 }));
+  for (const p of s.produtos) delete p.custo;
+  s.acessos = s.clientes.map((c) => ({ codigo: c.codigo, ref: c.id, nome: c.nome, pin: c.pin, ativo: c.ativo !== false }));
+  for (const c of s.clientes) { delete c.codigo; delete c.pin; }
   return s;
 }

@@ -1,37 +1,22 @@
-// Adaptador Supabase: carrega os documentos permitidos ao usuário (RLS), grava as alterações
-// feitas pelo app (diferença antes/depois de cada commit) e recebe mudanças em tempo real.
+// Adaptador Supabase (comum a todos os segmentos): carrega os documentos que o usuário pode ver
+// (as regras ficam no banco), grava o que o app alterou (diferença antes/depois de cada commit)
+// e recebe as mudanças dos outros aparelhos em tempo real.
 // Gravações passam por uma fila persistente: se a internet cair, são reenviadas depois.
 
 import { CONFIG } from '../config.js';
+import { SEGMENTO } from '../segmento.js';
 
-const TABELAS = ['produtos', 'clientes', 'movs', 'vendas', 'fechamentos', 'pedidos', 'despesas'];
+const COLECOES = Object.keys(SEGMENTO.colecoes);
 const PAGINA = 1000;
+const LOTE = 200;
+const SCHEMA = SEGMENTO.schema || 'public'; // pasta do app no banco (vários apps no mesmo projeto)
 
 export function criarNuvem(app, hooks) {
-  // Modo suporte: o painel de gestão (EasyApp Financial › Apps da fábrica) abre o app como o dono passando o
-  // acesso em #suporte=… . Essa sessão fica só nesta aba (sessionStorage) e não troca o login do navegador.
-  const SUP_KEY = `mt-suporte-${app}`;
-  let suporte = null;
-  try {
-    const h = new URLSearchParams(location.hash.startsWith('#suporte=') ? location.hash.slice(1) : '');
-    if (h.get('suporte')) { sessionStorage.setItem(SUP_KEY, decodeURIComponent(escape(atob(h.get('suporte'))))); history.replaceState(null, '', location.pathname + location.search + '#/'); }
-    suporte = JSON.parse(sessionStorage.getItem(SUP_KEY) || 'null');
-  } catch { suporte = null; }
   const sb = window.supabase.createClient(CONFIG.supabaseUrl, CONFIG.supabaseKey, {
-    db: { schema: CONFIG.schema || 'public' }, // pasta da Mil Terras no banco da fábrica
-    auth: suporte
-      ? { storageKey: SUP_KEY + '-auth', storage: window.sessionStorage, persistSession: true, autoRefreshToken: true, detectSessionInUrl: false }
-      : { storageKey: `mt-auth-${app}`, persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
+    db: { schema: SCHEMA },
+    auth: { storageKey: `${SEGMENTO.id}-auth-${app}`, persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
   });
-  const OUTBOX = suporte ? SUP_KEY + '-fila' : `mt-outbox-${app}`;
-  function faixaSuporte() {
-    if (!suporte || document.getElementById('mt-suporte')) return;
-    const el = document.createElement('div');
-    el.id = 'mt-suporte';
-    el.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:300;background:' + (suporte.modo === 'edicao' ? '#B3261E' : '#285E8C') + ';color:#fff;font:600 12.5px system-ui;padding:5px 10px;text-align:center';
-    el.textContent = 'Modo suporte · ' + (suporte.nome || '') + ' · ' + (suporte.modo === 'edicao' ? 'leitura e edição: o que mudar fica na conta' : 'só leitura');
-    document.body.appendChild(el);
-  }
+  const OUTBOX = `${SEGMENTO.id}-fila-${app}`;
   let state = null;
   let perfil = null;
   let snap = {};
@@ -39,16 +24,20 @@ export function criarNuvem(app, hooks) {
   let enviando = false;
   let fila = lerFila();
   let status = 'online';
-  const ehGestor = () => perfil?.papel === 'gestor' || perfil?.papel === 'dono';
+  const empresa = () => perfil?.empresaId;
+  const ehGestao = () => perfil?.papel === 'dono' || perfil?.papel === 'gestor';
+  // Visita de suporte: o administrador da plataforma abriu uma empresa (Plataforma › Abrir). Vem do banco em meu_perfil.
+  const suporte = () => (perfil?.suporte ? { ...perfil.suporte, nome: perfil.empresa?.nome || '' } : null);
+  let fimVisita = null;
 
   function lerFila() { try { return JSON.parse(localStorage.getItem(OUTBOX) || '[]'); } catch { return []; } }
   function salvarFila() { try { localStorage.setItem(OUTBOX, JSON.stringify(fila)); } catch {} }
   const setStatus = (s) => { if (s !== status) { status = s; hooks.onStatus?.(s, fila.length); } };
 
-  async function buscarTudo(tabela, colunas = 'id,data') {
+  async function buscarTudo() {
     const out = [];
     for (let de = 0; ; de += PAGINA) {
-      const { data, error } = await sb.from(tabela).select(colunas).order('id').range(de, de + PAGINA - 1);
+      const { data, error } = await sb.from('docs').select('id,colecao,data').eq('empresa_id', empresa()).order('id').range(de, de + PAGINA - 1);
       if (error) throw error;
       out.push(...data);
       if (data.length < PAGINA) return out;
@@ -57,102 +46,68 @@ export function criarNuvem(app, hooks) {
 
   function fotografar() {
     snap = { meta: JSON.stringify(state.meta) };
-    for (const t of TABELAS) snap[t] = new Map(state[t].map((x) => [x.id, JSON.stringify(x)]));
+    for (const c of COLECOES) snap[c] = new Map(state[c].map((x) => [x.id, JSON.stringify(x)]));
   }
 
   async function carregar() {
-    const gestor = ehGestor();
-    const [cfg, ...docs] = await Promise.all([buscarTudo('config'), ...TABELAS.map((t) => (t === 'despesas' && !gestor ? [] : buscarTudo(t)))]);
-    const custos = gestor ? Object.fromEntries((await buscarTudo('custos', 'id,custo')).map((r) => [r.id, +r.custo])) : {};
-    state = { meta: { ...(cfg.find((r) => r.id === 'geral')?.data || {}), demo: false } };
-    TABELAS.forEach((t, i) => { state[t] = docs[i].map((r) => r.data); });
-    for (const p of state.produtos) if (gestor) p.custo = custos[p.id] ?? p.custo ?? 0; else delete p.custo;
-    if (!gestor) await atualizarDisponivel(false);
-    // documentos pendentes na fila (ainda não enviados) prevalecem sobre o servidor
-    for (const op of fila) aplicarLocal(op);
+    const docs = await buscarTudo();
+    state = { meta: { demo: false } };
+    for (const c of COLECOES) state[c] = [];
+    for (const d of docs) {
+      if (d.colecao === 'config') { if (d.id === 'geral') state.meta = { ...d.data, demo: false }; }
+      else if (state[d.colecao]) state[d.colecao].push({ ...d.data, id: d.id }); // o id da linha manda (dados importados podem vir sem ele)
+    }
+    state.meta.empresa ||= perfil.empresa?.nome || '';
+    for (const op of fila) aplicarLocal(op); // o que ainda não foi enviado prevalece sobre o servidor
     fotografar();
     return state;
   }
 
   function aplicarLocal(op) {
-    if (op.tabela === 'config') { state.meta = { ...state.meta, ...op.data }; return; }
-    if (op.tabela === 'custos') { const p = state.produtos.find((x) => x.id === op.id); if (p) p.custo = op.custo; return; }
-    const arr = state[op.tabela];
+    if (op.colecao === 'config') { if (op.op !== 'delete') state.meta = { ...state.meta, ...op.data }; return; }
+    const arr = state[op.colecao];
+    if (!arr) return;
     const i = arr.findIndex((x) => x.id === op.id);
     if (op.op === 'delete') { if (i >= 0) arr.splice(i, 1); return; }
-    const doc = op.tabela === 'produtos' && i >= 0 ? { ...op.data, custo: arr[i].custo } : op.data;
-    if (i >= 0) arr[i] = doc; else arr.push(doc);
+    if (i >= 0) arr[i] = op.data; else arr.push(op.data);
   }
 
   // Compara o estado com a última fotografia e enfileira o que mudou
   function registrarMudancas() {
     const ops = [];
-    for (const t of TABELAS) {
-      const atual = new Map(state[t].map((x) => [x.id, x]));
-      for (const [id, doc] of atual) {
-        const j = JSON.stringify(doc);
-        const antes = snap[t].get(id);
-        if (antes === j) continue;
-        let data = doc;
-        if (t === 'produtos') {
-          const { custo, ...resto } = doc;
-          data = resto;
-          const antigo = antes ? JSON.parse(antes) : {};
-          if (ehGestor() && custo !== antigo.custo) ops.push({ tabela: 'custos', op: 'upsert', id, custo: +custo || 0 });
-          if (antes && JSON.stringify(resto) === JSON.stringify((({ custo: _, ...r }) => r)(antigo))) continue;
-        }
-        ops.push({ tabela: t, op: antes ? 'update' : 'insert', id, data });
-      }
-      for (const id of snap[t].keys()) if (!atual.has(id)) ops.push({ tabela: t, op: 'delete', id });
+    for (const c of COLECOES) {
+      const atual = new Map(state[c].map((x) => [x.id, x]));
+      for (const [id, doc] of atual) if (snap[c].get(id) !== JSON.stringify(doc)) ops.push({ colecao: c, op: 'upsert', id, data: doc });
+      for (const id of snap[c].keys()) if (!atual.has(id)) ops.push({ colecao: c, op: 'delete', id });
     }
-    const metaJ = JSON.stringify(state.meta);
-    if (metaJ !== snap.meta && ehGestor()) { const { demo, ...data } = state.meta; ops.push({ tabela: 'config', op: 'upsert', id: 'geral', data }); }
-    // custos precisam do produto já gravado
-    ops.sort((a, b) => (a.tabela === 'custos') - (b.tabela === 'custos'));
+    if (JSON.stringify(state.meta) !== snap.meta && ehGestao()) { const { demo, ...data } = state.meta; ops.push({ colecao: 'config', op: 'upsert', id: 'geral', data }); }
     fotografar();
-    if (ops.length) { fila.push(...ops); salvarFila(); enviar(); }
+    if (ops.length) { fila.push(...ops.map((o) => ({ ...o, empresa: empresa() }))); salvarFila(); enviar(); }
   }
 
-  async function executar(op) {
-    const q = sb.from(op.tabela);
-    if (op.tabela === 'custos') return q.upsert({ id: op.id, custo: op.custo });
-    if (op.tabela === 'config') return q.upsert({ id: op.id, data: op.data });
-    if (op.op === 'insert') {
-      const r = await q.insert({ id: op.id, data: op.data });
-      if (r.error?.code === '23505') return q.update({ data: op.data }).eq('id', op.id); // já existia (reenvio)
-      return r;
-    }
-    if (op.op === 'update') return q.update({ data: op.data }).eq('id', op.id);
-    return q.delete().eq('id', op.id);
-  }
-
+  const linha = (op) => ({ empresa_id: op.empresa, id: op.id, colecao: op.colecao, data: op.data });
   async function enviar() {
     if (enviando || !fila.length) { if (!fila.length) setStatus('online'); return; }
     enviando = true;
     setStatus('enviando');
     try {
       while (fila.length) {
-        // agrupa inserções seguidas da mesma tabela num único envio
         const op = fila[0];
         let lote = [op];
-        if (op.op === 'insert' && op.tabela !== 'custos' && op.tabela !== 'config') {
-          lote = [];
-          for (const x of fila) { if (x.op !== 'insert' || x.tabela !== op.tabela || lote.length >= 200) break; lote.push(x); }
-        }
+        if (op.op === 'upsert') { lote = []; for (const x of fila) { if (x.op !== 'upsert' || x.empresa !== op.empresa || lote.length >= LOTE || lote.some((y) => y.id === x.id)) break; lote.push(x); } }
         let r;
         try {
-          if (lote.length > 1) {
-            r = await sb.from(op.tabela).insert(lote.map((x) => ({ id: x.id, data: x.data })));
-            if (r.error?.code === '23505') { for (const x of lote) { r = await executar(x); if (r.error) break; } }
-          } else r = await executar(op);
+          r = op.op === 'upsert'
+            ? await sb.from('docs').upsert(lote.map(linha), { onConflict: 'empresa_id,id' })
+            : await sb.from('docs').delete().eq('empresa_id', op.empresa).eq('id', op.id);
         } catch (e) { r = { error: { rede: true, message: e.message } }; }
         if (r.error) {
           const rede = r.error.rede || !r.error.code || /fetch|network|Failed/i.test(r.error.message || '');
           if (rede) { setStatus('offline'); setTimeout(() => { enviando = false; enviar(); }, 15000); return; }
-          // recusado pelo servidor (permissão/regra): descarta e recarrega a verdade do servidor
+          // recusado pelo banco (permissão/regra): descarta e recarrega a verdade do servidor
           console.warn('Gravação recusada', op, r.error);
           fila.splice(0, lote.length); salvarFila();
-          hooks.onErro?.(r.error.message || 'Operação recusada pelo servidor');
+          hooks.onErro?.(traduzir(r.error.message));
           await carregar();
           hooks.onChange?.('recarregado', true);
           continue;
@@ -162,45 +117,34 @@ export function criarNuvem(app, hooks) {
       setStatus('online');
     } finally { enviando = false; }
   }
+  const traduzir = (m = '') => (/row-level security/i.test(m) ? (perfil?.empresa?.liberada === false ? 'assinatura vencida: os dados estão só para consulta' : 'sem permissão para esta alteração') : m || 'operação recusada pelo servidor');
   window.addEventListener('online', () => enviar());
   sb.auth.onAuthStateChange((evento) => { if (evento === 'PASSWORD_RECOVERY') setTimeout(() => hooks.onRecuperacao?.(), 300); });
 
   function ouvir() {
     canal?.unsubscribe();
-    canal = sb.channel('mt-' + app);
-    for (const t of [...TABELAS, 'config']) {
-      canal.on('postgres_changes', { event: '*', schema: CONFIG.schema || 'public', table: t }, (p) => {
-        if (!state) return;
-        if (t === 'config') { if (p.new?.data) { state.meta = { ...state.meta, ...p.new.data }; snap.meta = JSON.stringify(state.meta); hooks.onChange?.('config', true); } return; }
-        const id = p.new?.id || p.old?.id;
-        if (fila.some((op) => op.tabela === t && op.id === id)) return; // alteração local ainda pendente
-        const arr = state[t];
-        const i = arr.findIndex((x) => x.id === id);
-        if (p.eventType === 'DELETE') { if (i < 0) return; arr.splice(i, 1); snap[t].delete(id); hooks.onChange?.(t, true); return; }
-        const doc = p.new.data;
-        if (t === 'produtos') { if (ehGestor()) doc.custo = i >= 0 ? arr[i].custo : 0; }
-        const j = JSON.stringify(doc);
-        if (snap[t].get(id) === j) return; // eco da própria gravação
-        const antes = i >= 0 ? arr[i] : null;
-        if (i >= 0) arr[i] = doc; else arr.push(doc);
-        snap[t].set(id, j);
-        let msg = t;
-        if (t === 'fechamentos' && doc.status !== antes?.status) msg = doc.status === 'enviado' ? 'fechamento' : doc.status === 'aprovado' || doc.status === 'pago' ? 'aprovado' : t;
-        hooks.onChange?.(msg, true);
-        if (t === 'movs' || t === 'pedidos' || t === 'fechamentos') atualizarDisponivel();
-      });
-    }
+    canal = sb.channel(`${SEGMENTO.id}-${app}`);
+    canal.on('postgres_changes', { event: '*', schema: SCHEMA, table: 'docs', filter: `empresa_id=eq.${empresa()}` }, (p) => {
+      if (!state) return;
+      const id = p.new?.id || p.old?.id;
+      if (fila.some((op) => op.id === id)) return; // alteração local ainda pendente
+      if (p.eventType === 'DELETE') {
+        for (const c of COLECOES) { const i = state[c].findIndex((x) => x.id === id); if (i >= 0) { state[c].splice(i, 1); snap[c].delete(id); hooks.onChange?.(c, true); } }
+        return;
+      }
+      const c = p.new.colecao;
+      if (c === 'config') { if (id === 'geral') { state.meta = { ...p.new.data, demo: false }; snap.meta = JSON.stringify(state.meta); hooks.onChange?.('config', true); } return; }
+      if (!state[c]) return;
+      const doc = { ...p.new.data, id };
+      const j = JSON.stringify(doc);
+      if (snap[c].get(id) === j) return; // eco da própria gravação
+      const i = state[c].findIndex((x) => x.id === id);
+      const antes = i >= 0 ? state[c][i] : null;
+      if (i >= 0) state[c][i] = doc; else state[c].push(doc);
+      snap[c].set(id, j);
+      hooks.onChange?.(c, true, { colecao: c, doc, antes, novo: !antes });
+    });
     canal.subscribe();
-  }
-
-  // Parceiro: estoque disponível vem pronto do servidor (não enxerga as movimentações do depósito)
-  async function atualizarDisponivel(avisarTela = true) {
-    if (!state || ehGestor()) return;
-    const { data, error } = await sb.rpc('estoque_disponivel');
-    if (error) { console.warn('estoque_disponivel', error.message); return; }
-    const antes = JSON.stringify(state.disponivelRemoto || {});
-    state.disponivelRemoto = data || {};
-    if (avisarTela && antes !== JSON.stringify(state.disponivelRemoto)) hooks.onChange?.('disponivel', true);
   }
 
   async function lerPerfil() {
@@ -212,13 +156,32 @@ export function criarNuvem(app, hooks) {
 
   async function iniciarSessao() {
     await lerPerfil();
-    if (!perfil) return false;
+    clearTimeout(fimVisita);
+    // a visita vence sozinha (2 h): o app volta para a conta do próprio administrador
+    if (perfil?.suporte?.ate) fimVisita = setTimeout(() => recomecar().then(() => hooks.onChange?.('recarregado', true)), Math.max(1000, new Date(perfil.suporte.ate) - Date.now() + 1000));
+    if (!perfil?.empresaId) { canal?.unsubscribe(); state = null; return false; }
     await carregar();
     ouvir();
     enviar();
-    sb.rpc('registrar_acesso').then(({ error }) => error && console.warn('registrar_acesso', error.message)); // registro de atividades
+    sb.rpc('registrar_acesso').then(({ error }) => error && console.warn('registrar_acesso', error.message));
+    sinalPresenca();
     return true;
   }
+  // Presença: enquanto o app está aberto e visível, avisa o banco a cada 2 minutos (o painel mostra quem está conectado).
+  // O modo suporte não conta como presença do cliente.
+  let presenca = null;
+  function sinalPresenca() {
+    if (suporte() || presenca) return;
+    const bater = () => { if (document.visibilityState === 'visible') sb.rpc('sinal').then(() => {}, () => {}); };
+    bater();
+    presenca = setInterval(bater, 120000);
+    document.addEventListener('visibilitychange', bater);
+  }
+
+  // troca de empresa (visita de suporte): recarrega perfil, dados e o canal de tempo real
+  async function recomecar() { canal?.unsubscribe(); return iniciarSessao(); }
+
+  const erroLogin = (m) => (m === 'Invalid login credentials' ? 'E-mail ou senha incorretos' : m === 'Email not confirmed' ? 'Confirme o e-mail antes de entrar (veja sua caixa de entrada)' : m);
 
   return {
     sb,
@@ -227,37 +190,40 @@ export function criarNuvem(app, hooks) {
     get status() { return fila.length && status === 'online' ? 'enviando' : status; },
     get pendentes() { return fila.length; },
     registrarMudancas,
-    get suporte() { return suporte; },
+    get suporte() { return suporte(); },
     async iniciar() {
-      if (suporte?.access_token) { await sb.auth.setSession({ access_token: suporte.access_token, refresh_token: suporte.refresh_token }); delete suporte.access_token; sessionStorage.setItem(SUP_KEY, JSON.stringify(suporte)); }
-      if (suporte) faixaSuporte();
       const { data } = await sb.auth.getSession();
       if (!data.session) return false;
       try { return await iniciarSessao(); } catch (e) { console.warn(e); hooks.onErro?.('Sem conexão com o servidor. Tente novamente.'); return false; }
     },
-    async entrarGestor(email, senha) {
+    async entrarEmail(email, senha) {
       const { error } = await sb.auth.signInWithPassword({ email, password: senha });
-      if (error) throw new Error(error.message === 'Invalid login credentials' ? 'E-mail ou senha incorretos' : error.message === 'Email not confirmed' ? 'Confirme o e-mail antes de entrar (veja sua caixa de entrada)' : error.message);
+      if (error) throw new Error(erroLogin(error.message));
       return iniciarSessao();
     },
-    async cadastrarGestor(email, senha) {
+    async cadastrar(email, senha) {
       const { data, error } = await sb.auth.signUp({ email, password: senha, options: { emailRedirectTo: location.origin + location.pathname } });
       if (error) throw new Error(error.message);
-      return !!data.session; // false = precisa confirmar e-mail
+      return !!data.session; // false = precisa confirmar o e-mail
     },
-    async ativarGestor(codigo) {
-      const { data, error } = await sb.rpc('tornar_gestor', { p_codigo: codigo });
+    async criarEmpresa(nome) {
+      const { error } = await sb.rpc('criar_empresa', { p_nome: nome });
       if (error) throw new Error(error.message);
-      if (!data) throw new Error('Código de instalação incorreto');
       return iniciarSessao();
     },
-    async entrarParceiro(codigo, pin) {
+    async entrarConvite(codigo) {
+      const { data, error } = await sb.rpc('entrar_convite', { p_codigo: codigo });
+      if (error) throw new Error(error.message);
+      if (!data) throw new Error('Convite inválido, expirado ou já usado');
+      return iniciarSessao();
+    },
+    async entrarCodigo(codigo, pin) {
       const { data: s } = await sb.auth.getSession();
       if (!s.session) {
         const { error } = await sb.auth.signInAnonymously();
-        if (error) throw new Error(/anonymous/i.test(error.message) ? 'Login de parceiros desativado no servidor (ative "Anonymous sign-ins" no Supabase).' : error.message);
+        if (error) throw new Error(/anonymous/i.test(error.message) ? 'Login por código desativado no servidor (ative "Anonymous sign-ins" no Supabase).' : error.message);
       }
-      const { data, error } = await sb.rpc('vincular_parceiro', { p_codigo: codigo, p_pin: pin });
+      const { data, error } = await sb.rpc('vincular_usuario', { p_codigo: codigo, p_pin: pin });
       if (error) throw new Error(error.message);
       if (!data) throw new Error('Código ou PIN incorreto');
       return iniciarSessao();
@@ -272,12 +238,48 @@ export function criarNuvem(app, hooks) {
     },
     async sair() {
       canal?.unsubscribe();
-      if (suporte) { try { sessionStorage.removeItem(SUP_KEY); } catch {} }
+      clearTimeout(fimVisita);
+      if (suporte()) await sb.rpc('suporte_sair').then(() => {}, () => {});
       await sb.auth.signOut();
       perfil = null; state = null;
     },
-    atualizarDisponivel,
+    async temSessao() { return !!(await sb.auth.getSession())?.data?.session; },
+    lerPerfil,
+    // Acessos (código + PIN) dos usuários do app de campo
+    acessos: {
+      async listar() { const { data, error } = await sb.from('acessos').select('codigo,ref,nome,pin,ativo').eq('empresa_id', empresa()); if (error) throw new Error(error.message); return data; },
+      async criar(ref, nome) { const { data, error } = await sb.from('acessos').insert({ empresa_id: empresa(), ref, nome }).select('codigo,ref,nome,pin,ativo').single(); if (error) throw new Error(traduzir(error.message)); return data; },
+      async alterar(ref, campos) { const { error } = await sb.from('acessos').update(campos).eq('empresa_id', empresa()).eq('ref', ref); if (error) throw new Error(traduzir(error.message)); },
+      async apagar(ref) { const { error } = await sb.from('acessos').delete().eq('empresa_id', empresa()).eq('ref', ref); if (error) throw new Error(error.message); },
+    },
+    async renomearEmpresa(nome) { const { error } = await sb.from('empresas').update({ nome }).eq('id', empresa()); if (error) throw new Error(error.message); perfil.empresa.nome = nome; },
+    // ---- Visita de suporte (administrador) ----
+    // Verificação em duas etapas (app autenticador): o banco só abre empresas com a sessão em aal2.
+    mfa: {
+      async nivel() { const { data } = await sb.auth.mfa.getAuthenticatorAssuranceLevel(); return data?.currentLevel || 'aal1'; },
+      async fator() { const { data } = await sb.auth.mfa.listFactors(); return (data?.totp || []).find((f) => f.status === 'verified') || null; },
+      async cadastrar() {
+        const { data: l } = await sb.auth.mfa.listFactors();
+        for (const f of l?.all || []) if (f.status !== 'verified') await sb.auth.mfa.unenroll({ factorId: f.id });
+        const { data, error } = await sb.auth.mfa.enroll({ factorType: 'totp', friendlyName: `${SEGMENTO.nome} ${new Date().toISOString().slice(0, 10)}` });
+        if (error) throw new Error(error.message);
+        return { id: data.id, qr: data.totp.qr_code, segredo: data.totp.secret };
+      },
+      async confirmar(factorId, code) {
+        const { error } = await sb.auth.mfa.challengeAndVerify({ factorId, code: String(code).replace(/\D/g, '') });
+        if (error) throw new Error(/invalid|expired/i.test(error.message) ? 'Código incorreto ou vencido' : error.message);
+      },
+    },
+    async abrirEmpresa(id, modo) {
+      const { error } = await sb.rpc('suporte_abrir', { p_empresa: id, p_modo: modo });
+      if (error) throw new Error(error.message);
+      return recomecar();
+    },
+    async sairSuporte() {
+      await sb.rpc('suporte_sair');
+      return recomecar();
+    },
     rpc: async (fn, args) => { const { data, error } = await sb.rpc(fn, args); if (error) throw new Error(error.message); return data; },
-    recarregar: async () => { await carregar(); hooks.onChange?.('recarregado', true); },
+    recarregar: async () => { await lerPerfil(); await carregar(); hooks.onChange?.('recarregado', true); },
   };
 }

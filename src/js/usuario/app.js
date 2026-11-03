@@ -1,71 +1,46 @@
-// App do Parceiro — restaurantes, bares e lojas com vinhos Mil Terras em consignação
+// App do Parceiro — restaurantes, bares e lojas com vinhos Mil Terras em consignação.
+// Login (código + PIN), conta, instalação, atualização e assistente vêm do núcleo (src/js/core/app.js).
+import { criarApp } from '../core/app.js';
 import * as store from '../core/store.js';
-import * as D from '../core/domain.js';
-import { HARMONIZA } from '../core/catalogo.js';
+import * as D from '../dominio.js';
+import { HARMONIZA } from '../catalogo.js';
 import { money, money0, moneyK, int, percent, date, dateShort, relDays, today, addDays, diffDays, esc, sum, plural, sortBy } from '../core/fmt.js';
-import { icon, router, delegate, modal, closeModal, confirmar, toast, kpi, badge, empty, thumb, stepper, stepHandler, fichaVinho, iniciais, qtdBadge, waLink, download, toCSV, asset, instalar, bannerInstalar, dispensarBanner, registerSW, verificarAtualizacao, versaoApp, moneyInput, parseMoney } from '../core/ui.js';
-import { chart, mountCharts, resetCharts, hbars, heatmap } from '../core/charts.js';
-import { novoWizard, renderWizard, wizardHandlers, statusBadge, ajustesHTML, acertosHTML } from '../core/fechamento-ui.js';
-import { criarIA, extrasParceiro } from '../core/ia.js';
+import { icon, modal, closeModal, confirmar, toast, kpi, badge, empty, stepper, stepHandler, iniciais, waLink, download, toCSV, asset, moneyInput, parseMoney, versaoApp } from '../core/ui.js';
+import { thumb, fichaVinho, qtdBadge } from '../vinhos-ui.js';
+import { chart, hbars, heatmap } from '../core/charts.js';
+import { novoWizard, renderWizard, wizardHandlers, statusBadge, ajustesHTML, acertosHTML } from '../fechamento-ui.js';
+import { extrasParceiro } from '../ia-extras.js';
 
-const app = document.getElementById('app');
 const S = () => store.get();
-const SESSION = 'milterras:parceiro';
-// ?ver=<id>: a Gestão abre a conta do parceiro em modo visualização (somente leitura)
-const ESPELHO = new URLSearchParams(location.search).get('ver');
-const espelhoOk = () => ESPELHO && (store.modo === 'local' || store.ehGestor());
-const cid = () => (espelhoOk() ? ESPELHO : store.modo === 'local' ? localStorage.getItem(SESSION) : store.perfil()?.clienteId);
+// a Gestão pode abrir o app de um parceiro como ele vê (?ver=<id>, só leitura): o núcleo cuida do login e do bloqueio
+const espelhoOk = () => !!store.espelho;
+const cid = () => store.meuRef();
 const C = () => D.cliente(S(), cid());
 
-const NAV = [['#/inicio', 'home', 'Início'], ['#/relatorios', 'chart', 'Relatórios'], ['#/vender', 'plus', 'Vender'], ['#/fechamento', 'receipt', 'Fechamento'], ['#/mais', 'menu', 'Mais']];
+const TABS = [['#/inicio', 'home', 'Início'], ['#/relatorios', 'chart', 'Relatórios'], ['#/vender', 'plus', 'Vender'], ['#/fechamento', 'receipt', 'Fechamento'], ['#/mais', 'menu', 'Mais']];
 const SIDE = [['#/inicio', 'home', 'Início'], ['#/vender', 'plus', 'Registrar venda'], ['#/estoque', 'box', 'Meu estoque'], ['#/relatorios', 'chart', 'Relatórios'], ['#/fechamento', 'receipt', 'Fechamento'], ['#/pedido', 'truck', 'Pedir reposição'], ['#/carta', 'wine', 'Carta e harmonização'], ['#/ajustes', 'gear', 'Equipe e preços']];
 
-let current = {};
 let handlers = {};
 let wz = null;
+const shell = (...a) => A.tela(...a);
+const pageHead = (...a) => A.pageHead(...a);
+const rerender = () => A.rerender();
+const current = { get pattern() { return A.current.pattern; } };
 
-// ---------- Assistente (IA) ----------
-// O parceiro vê só o que é dele (na nuvem o banco já filtrou; na demonstração o aparelho tem tudo)
-const IA_SVG = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></svg>';
-const COL_IA = { produtos: ['Rótulos da Mil Terras', false], clientes: ['Meu cadastro', false], movs: ['Remessas e movimentações', false], vendas: ['Minhas vendas', false], fechamentos: ['Meus fechamentos', false], pedidos: ['Meus pedidos de reposição', true] };
-const ia = criarIA({
-  app: 'usuario',
-  colecoes: () => Object.fromEntries(Object.entries(COL_IA).map(([k, [nome, escrita]]) => [k, { nome, escrita: escrita && !espelhoOk() }])),
-  extras: () => extrasParceiro(S(), cid()),
-  visivel: () => { const s = S(), id = cid(); return { ...s, clientes: s.clientes.filter((c) => c.id === id), movs: s.movs.filter((m) => m.clienteId === id), vendas: s.vendas.filter((v) => v.clienteId === id),
-    fechamentos: s.fechamentos.filter((f) => f.clienteId === id), pedidos: (s.pedidos || []).filter((p) => p.clienteId === id), despesas: [] }; },
-  quem: () => C()?.nome || '', ref: () => cid(),
-  sugestoes: () => ({
-    '/inicio': ['Quais vinhos mais vendi este mês?', 'O que devo pedir de reposição?'],
-    '/estoque': ['Quais garrafas estão paradas há mais tempo?'],
-    '/relatorios': ['Qual garçom mais vendeu este mês?', 'Como foi este mês comparado com o anterior?'],
-    '/fechamento': ['Quanto vou pagar no próximo fechamento, mais ou menos?'],
-    '/pedido': ['Monte um pedido de reposição pelo meu ritmo de vendas'],
-  }[current.pattern] || ['Que vinho combina com costela?']),
-});
+// Estoque disponível para pedir: na nuvem vem pronto do servidor (o parceiro não vê as movimentações do depósito)
+async function atualizarDisponivel() {
+  const s = S();
+  if (!s || store.modo !== 'nuvem' || espelhoOk()) return;
+  try {
+    const d = await store.rpc('estoque_disponivel');
+    const antes = JSON.stringify(s.disponivelRemoto || {});
+    s.disponivelRemoto = d || {};
+    if (antes !== JSON.stringify(s.disponivelRemoto) && A.current.view) rerender();
+  } catch (e) { console.warn('estoque_disponivel', e.message); }
+}
 
 // Selo de preço especial (promoção da Mil Terras para este parceiro)
 const promo = (s, c, pid) => { const x = D.promocao(s, c, pid); return x ? ` <span class="badge ok">preço especial${x.ate ? ' até ' + dateShort(x.ate) : ''}</span>` : ''; };
-
-function shell(title, content, { back } = {}) {
-  const c = C();
-  const route = '#' + (location.hash.slice(1).split('?')[0] || '');
-  const on = (h) => route === h || route.startsWith(h + '/');
-  const per = D.periodoAtual(S(), c.id);
-  const due = !per.pendente && per.previsto <= addDays(today(), 1);
-  const b = (h) => (h === '#/fechamento' && due ? '<span class="badge dot">!</span>' : '');
-  return `<div class="shell">
-    <aside class="side"><div class="brand"><img src="${asset('assets/logo/logo_h_negativo.png')}" alt="Mil Terras"><div class="who">${esc(c.nome)}</div></div>
-      ${SIDE.map(([h, ic, n]) => `<a class="nav-a ${on(h) ? 'on' : ''}" href="${h}">${icon(ic)}<span>${n}</span>${b(h)}</a>`).join('')}
-      <a class="nav-a" href="#" data-act="eaiAbrir">${icon('spark')}<span>Assistente</span></a>
-      <div class="foot"><span class="sync">Conectado à Mil Terras</span><br><a href="#" data-act="logout" style="color:#C9B3AC">Sair</a></div></aside>
-    <div>
-      <header class="topbar">${back ? `<button data-act="back" aria-label="Voltar">${icon('arrowL')}</button>` : `<img src="${asset('assets/logo/simbolo_negativo.png')}" alt="">`}<div class="t ellipsis">${title}</div><a style="color:#fff" target="_blank" rel="noopener" href="${waLink(S().meta.whatsapp, `Olá, Mil Terras! Aqui é do ${c.nome}.`)}" aria-label="Falar com a Mil Terras">${icon('whatsapp')}</a><button class="eai-topo" data-act="eaiAbrir" aria-label="Assistente" title="Assistente" style="color:#fff">${IA_SVG}</button></header>
-      <main class="main">${espelhoOk() ? `<div class="demo-banner">${icon('info')}<span class="grow">Você está vendo o app de <b>${esc(c.nome)}</b> como ele vê, em tempo real. <b>Somente leitura.</b></span><a href="#" data-act="fecharEspelho">Fechar</a></div>` : ''}${content}</main></div>
-    <nav class="tabbar">${NAV.map(([h, ic, n]) => h === '#/vender' ? `<a href="${h}" class="fab"><span class="ic">${icon('plus')}</span></a>` : `<a href="${h}" class="${on(h) || (h === '#/mais' && ['#/carta', '#/ajustes', '#/estoque', '#/pedido'].some(on)) ? 'on' : ''}">${icon(ic)}<span>${n}</span>${b(h)}</a>`).join('')}</nav>
-  </div>`;
-}
-const pageHead = (t, sub = '', actions = '') => `<div class="pagehead"><div><h1>${t}</h1>${sub ? `<div class="sub">${sub}</div>` : ''}</div><div class="row wrap">${actions}</div></div>`;
 
 // ---------- Início ----------
 function vInicio() {
@@ -81,7 +56,6 @@ function vInicio() {
   const transito = D.remessas(s).filter((r) => r.clienteId === c.id && r.status !== 'entregue');
   const lotesAlerta = D.lotesAbertos(s, c.id).filter((l) => l.situacao === 'vencido' || l.situacao === 'vencendo');
   return shell('Início', `
-    ${bannerInstalar()}
     <div class="pagehead"><div><div class="label">${esc(c.cidade)}</div><h1 style="margin-top:4px">${esc(c.nome)}</h1></div><a class="btn hide-m" href="#/vender">${icon('plus')} Registrar venda</a></div>
     <div class="card dark">
       <div class="row between wrap"><div class="label">Período atual · desde ${date(per.desde)}</div>${per.pendente ? badge('Fechamento enviado', 'warn') : badge(dias < 0 ? `fechamento atrasado ${-dias}d` : dias === 0 ? 'fechamento hoje' : `fecha em ${dias} dias`, dias <= 0 ? 'crit' : '')}</div>
@@ -318,22 +292,6 @@ function vAjustes() {
       <div class="tiny muted mt">Para alterar, fale com a Mil Terras.</div></div>`, { back: true });
 }
 
-// ---------- Login ----------
-function vLogin() {
-  if (ESPELHO) return `<div class="login"><div class="box col center" style="gap:14px"><img class="logo" src="${asset('assets/logo/logo_v.png')}" alt="Mil Terras"><div class="small">Para ver a conta de um parceiro, entre primeiro na <b>Gestão</b> neste navegador e use o botão “Ver app” do parceiro.</div><a class="btn" href="../gestor/">Abrir Gestão</a></div></div>`;
-  const s = S() || { meta: {} };
-  return `<div class="login"><form class="box col" data-onsubmit="login" style="gap:14px">
-    <img class="logo" src="${asset('assets/logo/logo_v.png')}" alt="Mil Terras">
-    <div class="center"><div class="label">Portal do parceiro</div></div>
-    <label class="field"><span>Código do estabelecimento</span><input class="input" name="codigo" autocapitalize="characters" autocomplete="username" required style="text-transform:uppercase"></label>
-    <label class="field"><span>PIN</span><input class="input" name="pin" type="password" inputmode="numeric" maxlength="4" autocomplete="current-password" required></label>
-    <button class="btn lg block">Entrar</button>
-    ${store.modo === 'local' ? '<div class="tiny center" style="color:var(--dourado)">Modo demonstração · dados fictícios</div>' : ''}
-    ${s.meta.demo ? `<div class="tiny muted center">Demonstração: use o código <b>${s.clientes[0].codigo}</b> e PIN <b>${s.clientes[0].pin}</b><br>(outros: ${s.clientes.slice(1, 5).map((c) => c.codigo).join(', ')})</div>` : ''}
-  </form></div>`;
-}
-
-// ---------- Render ----------
 // ---------- Pedido de reposição (entre fechamentos) ----------
 let rascunho = {};
 let pedidoIniciado = false;
@@ -363,43 +321,9 @@ function vPedido({ query }) {
       ${p.status === 'solicitado' ? `<button class="iconbtn" data-act="cancelarPedido" data-id="${p.id}" aria-label="Cancelar">${icon('trash')}</button>` : ''}</div>`; }).join('')}</div></div>` : ''}`, { back: true });
 }
 
-const ROUTES = [['/inicio', vInicio], ['/pedido', vPedido], ['/vender', vVender], ['/estoque', vEstoque], ['/relatorios', vRelatorios], ['/fechamento', vFechamentos], ['/fechamento/novo', vNovoFechamento], ['/fechamento/:id', vFechamento], ['/carta', vCarta], ['/mais', vMais], ['/ajustes', vAjustes]];
 
-function render(view, params, pattern) {
-  current = { view, params, pattern };
-  handlers = {};
-  resetCharts();
-  const ok = S() && cid() && C()?.ativo;
-  app.innerHTML = ok ? view(params) : vLogin();
-  mountCharts(app);
-  if (ok && (pattern === '/pedido' || pattern === '/fechamento/novo')) store.atualizarDisponivel();
-}
-function rerender() { const y = scrollY; render(current.view, current.params, current.pattern); scrollTo(0, y); }
-const go = router(ROUTES, render);
-
-const common = {
-  goto: (el) => (location.hash = el.dataset.h),
-  eaiAbrir: () => ia.abrir(),
-  back: () => (history.length > 1 ? history.back() : (location.hash = '#/inicio')),
+const acoes = {
   print: () => window.print(),
-  install: instalar,
-  atualizarApp: () => verificarAtualizacao(true),
-  semBanner: () => { dispensarBanner(); rerender(); },
-  step: stepHandler,
-  logout: async () => { ia.limpar(); localStorage.removeItem(SESSION); await store.sair(); go(); },
-  login: async (f) => {
-    const fd = new FormData(f);
-    if (store.modo === 'nuvem') {
-      const btn = f.querySelector('button'); btn.disabled = true;
-      try { await store.entrarParceiro(String(fd.get('codigo')), String(fd.get('pin'))); location.hash = '#/inicio'; go(); }
-      catch (e) { toast(e.message); btn.disabled = false; }
-      return;
-    }
-    const c = S().clientes.find((x) => x.ativo && x.codigo === String(fd.get('codigo')).trim().toUpperCase() && x.pin === String(fd.get('pin')).trim());
-    if (!c) return toast('Código ou PIN incorreto');
-    localStorage.setItem(SESSION, c.id);
-    location.hash = '#/inicio'; go();
-  },
   vender: (el) => modalVenda(el.dataset.p),
   desfazer: (el) => confirmar('Remover esta venda?', { ok: 'Remover' }).then((y) => y && store.commit((st) => { st.vendas = st.vendas.filter((v) => v.id !== el.dataset.id); })),
   ficha: (el) => {
@@ -416,11 +340,10 @@ const common = {
         closeModal(); toast(`${p.nome} na sua fila de pedido (${n})`);
       } } });
   },
-  fecharEspelho: () => { window.close(); setTimeout(() => (location.href = '../gestor/' + (store.demo ? '?demo=1' : '')), 200); },
-  limparFila: () => store.commit((st) => { D.cliente(st, cid()).filaPedido = {}; }),
+    limparFila: () => store.commit((st) => { D.cliente(st, cid()).filaPedido = {}; }),
   csv: (el) => { const s = S(), c = C(); const rows = [['Data', 'Hora', 'Vinho', 'Qtd', 'Garçom', 'Preço carta', 'Total']];
     for (const v of sortBy(D.vendasCliente(s, c.id, el.dataset.de), (v) => v.data)) rows.push([v.data, v.hora || '', D.produto(s, v.produtoId).nome, v.qtd, D.garcom(c, v.garcomId)?.nome || '', v.precoCarta.toFixed(2).replace('.', ','), (v.qtd * v.precoCarta).toFixed(2).replace('.', ',')]);
-    download(`vendas-${c.codigo.toLowerCase()}-${today()}.csv`, toCSV(rows), 'text/csv'); },
+    download(`vendas-${String(c.nome || 'parceiro').toLowerCase().normalize('NFD').replace(/[^a-z0-9]+/g, '-')}-${today()}.csv`, toCSV(rows), 'text/csv'); },
   addG: (f) => { const nome = new FormData(f).get('nome').trim(); if (!nome) return; store.commit((st) => D.cliente(st, cid()).garcons.push({ id: 'g' + Date.now().toString(36), nome, ativo: true })); toast('Garçom adicionado'); },
   rmG: (el) => confirmar('Remover este garçom? As vendas antigas continuam nos relatórios.', { ok: 'Remover' }).then((y) => y && store.commit((st) => { D.garcom(D.cliente(st, cid()), el.dataset.id).ativo = false; })),
   precos: (f) => { const fd = new FormData(f); store.commit((st) => { const c = D.cliente(st, cid()); for (const [k, v] of fd) { const n = parseMoney(v); if (n > 0) c.precosCarta[k] = n; } }); toast('Preços atualizados'); },
@@ -453,16 +376,39 @@ const common = {
 // No modo visualização (Gestão vendo o app do parceiro) as ações que gravam ficam bloqueadas
 const ESCRITA = new Set(['vender', 'desfazer', 'addG', 'rmG', 'precos', 'enviarPedido', 'cancelarPedido', 'wz-send', 'wz-approve', 'limparFila', 'addFila']);
 const bloqueado = () => toast('Modo visualização: só o parceiro pode fazer alterações');
-delegate(app, new Proxy({}, { get: (_, k) => (espelhoOk() && ESCRITA.has(k) ? bloqueado : handlers[k] || common[k]) }));
-store.subscribe((s, msg, externo) => {
-  if (!S() || !current.view) return; // ainda carregando
-  if (document.querySelector('.overlay') && externo) return;
-  if (externo && msg === 'aprovado') toast('A Mil Terras aprovou seu fechamento — reposição a caminho!');
-  if (current.pattern === '/fechamento/novo' && msg !== 'fechamento' && msg !== 'disponivel') return; // não interromper a contagem
-  rerender();
+
+const ROTAS = [['/inicio', vInicio], ['/pedido', vPedido], ['/vender', vVender], ['/estoque', vEstoque], ['/relatorios', vRelatorios], ['/fechamento', vFechamentos], ['/fechamento/novo', vNovoFechamento], ['/fechamento/:id', vFechamento], ['/carta', vCarta], ['/mais', vMais], ['/ajustes', vAjustes]];
+const A = criarApp({
+  tipo: 'usuario',
+  inicio: '#/inicio',
+  nav: SIDE,
+  tabs: TABS,
+  rotas: ROTAS.map(([p, v]) => [p, (params) => {
+    handlers = {};
+    const c = C();
+    if (!c || c.ativo === false) return shell('Parceiro', empty(c ? 'Este cadastro está desativado. Fale com a Mil Terras.' : 'Cadastro do parceiro não encontrado.'));
+    if (p === '/pedido' || p === '/fechamento/novo') setTimeout(atualizarDisponivel);
+    return v(params);
+  }]),
+  nomeUsuario: () => C()?.nome || '',
+  dicaDemo: 'Demonstração: veja os códigos e PINs em Gestão › Configurações (ex.: código BELLA, PIN 1234)',
+  topoDireita: (s) => `<a style="color:#fff" target="_blank" rel="noopener" href="${waLink(s.meta.whatsapp, `Olá, Mil Terras! Aqui é do ${C()?.nome || ''}.`)}" aria-label="Falar com a Mil Terras">${icon('whatsapp')}</a>`,
+  badges: (s) => { const c = C(); if (!c) return {}; const per = D.periodoAtual(s, c.id); return { '#/fechamento': !per.pendente && per.previsto <= addDays(today(), 1) ? '!' : 0 }; },
+  sugestoes: (rota) => ({
+    '/inicio': ['Quais vinhos mais vendi este mês?', 'O que devo pedir de reposição?'],
+    '/estoque': ['Quais garrafas estão paradas há mais tempo?'],
+    '/relatorios': ['Qual garçom mais vendeu este mês?', 'Como foi este mês comparado com o anterior?'],
+    '/fechamento': ['Quanto vou pagar no próximo fechamento, mais ou menos?'],
+    '/pedido': ['Monte um pedido de reposição pelo meu ritmo de vendas'],
+  }[rota] || ['Que vinho combina com costela?']),
+  iaExtras: (s) => extrasParceiro(s, cid()),
+  aposEntrar: () => atualizarDisponivel(),
+  aoMudar: (msg, externo, info) => {
+    if (externo && info?.colecao === 'fechamentos' && ['aprovado', 'pago'].includes(info.doc.status) && info.antes?.status === 'enviado') toast('A Mil Terras aprovou seu fechamento — reposição a caminho!');
+    if (externo && ['movs', 'pedidos', 'fechamentos'].includes(info?.colecao)) atualizarDisponivel();
+  },
+  naoRedesenhar: (rota, externo) => rota === '/fechamento/novo' && externo,
+  acoes: new Proxy({}, { get: (_, k) => (espelhoOk() && ESCRITA.has(k) ? bloqueado : handlers[k] || acoes[k]) }),
 });
-store.onErro((m) => toast('Não foi possível salvar: ' + m));
-registerSW();
-app.innerHTML = `<div class="login"><img src="${asset('assets/logo/logo_v_negativo.png')}" alt="Mil Terras" style="width:200px;opacity:.9"></div>`;
-if (ESPELHO) store.setSomenteLeitura(true);
-store.init(ESPELHO && store.modo === 'nuvem' ? 'gestor' : 'parceiro').then(() => go());
+
+A.iniciar();

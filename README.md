@@ -4,8 +4,8 @@ Controle de estoque, consignação, fechamentos e financeiro da **Mil Terras** (
 
 | App | Para quem | Caminho |
 |---|---|---|
-| **Mil Terras Gestão** | Distribuidora | `/gestor/` · demo: `/gestor/?demo=1` (PIN `0000`) |
-| **Mil Terras Parceiro** | Restaurantes, bares e lojas | `/cliente/` · demo: `/cliente/?demo=1` (código `BELLA`, PIN `1234`) |
+| **Mil Terras Gestão** | Distribuidora | `/gestao/` · demo: `/gestao/?demo=1` (PIN `0000`) |
+| **Mil Terras Parceiro** | Restaurantes, bares e lojas | `/usuario/` · demo: `/usuario/?demo=1` (código `BELLA`, PIN `1234`) |
 
 Endereço publicado: **https://rodrigopiratini.github.io/MilTerras/** · Passo a passo para colocar no ar: [`docs/INSTALACAO.md`](docs/INSTALACAO.md).
 
@@ -24,25 +24,22 @@ Abra http://localhost:8080. Sem Supabase configurado (ou com `?demo=1`), os apps
 O workflow `.github/workflows/pages.yml` publica no GitHub Pages a cada push (ative uma vez em Settings › Pages › Source: GitHub Actions). Funciona em qualquer hospedagem estática com HTTPS. No iPhone, o parceiro abre o link no Safari e toca em **Compartilhar › Adicionar à Tela de Início**.
 
 ## Estrutura
+Feito no molde **EasyAPP-Base** (como o Frota e o Golden): o núcleo (`src/js/core/`, `src/css/base.css`, `supabase/base.sql`,
+`sw.js`, workflow) vem de lá; aqui fica só o que é da Mil Terras.
 ```
 index.html               escolha do app
-gestor/  cliente/        páginas + manifest de cada app
-src/js/core/             dados e regras compartilhadas
-  catalogo.js            14 rótulos (catálogo + tabela de preços)
-  domain.js              estoque, consignação, fechamentos, financeiro, alertas
-  seed.js                primeira carga + histórico simulado (fictício)
-  store.js               dados: modo nuvem (Supabase) ou local (demonstração)
-  cloud.js               adaptador Supabase: login, RLS, fila offline, tempo real
-  charts.js, ui.js       gráficos SVG e componentes
-  fechamento-ui.js       assistente de fechamento (usado pelos dois apps)
-src/js/gestor/app.js     telas da Gestão
-src/js/cliente/app.js    telas do Parceiro
-src/css/app.css          identidade visual (Manual da Marca)
-assets/                  logo, ícones e garrafas recortados dos PDFs
-src/js/config.js         URL e chave pública do Supabase
-src/vendor/supabase.js   supabase-js 2.117.3 (UMD)
-supabase/instalar.sql    instalação completa do banco (gerado por supabase/gerar.mjs a partir de setup.sql)
-sw.js                    funcionamento offline
+gestao/  usuario/        Gestão e Parceiro (gestor/ e cliente/ só redirecionam os apps já instalados)
+src/js/segmento.js       nome, coleções e regras de acesso, assistente
+src/js/dominio.js        estoque, consignação, fechamentos, financeiro, alertas
+src/js/gestao/app.js     telas da Gestão
+src/js/usuario/app.js    telas do Parceiro
+src/js/fechamento-ui.js  assistente de fechamento (usado pelos dois apps)
+src/js/vinhos-ui.js      garrafas e fichas dos vinhos
+src/js/catalogo.js       14 rótulos (catálogo + tabela de preços) · seed.js: demonstração
+src/css/segmento.css     cores da marca (Manual da Marca)
+supabase/segmento.sql    regras extras do parceiro + estoque disponível
+supabase/instalar.sql    instalação do banco (gerado por supabase/gerar.mjs)
+supabase/migrar-para-molde.sql  migração única do formato antigo (03/11/2026)
 ```
 
 ## Dados e segurança

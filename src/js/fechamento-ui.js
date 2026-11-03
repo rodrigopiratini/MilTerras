@@ -1,8 +1,9 @@
 // Assistente de fechamento do período (usado pelo Parceiro e pela Gestão)
 // 1. Contagem física  2. Reposição e novos rótulos  3. Pagamento e envio
-import * as D from './domain.js';
-import { money, int, date, addDays, today, esc, sum, plural } from './fmt.js';
-import { icon, thumb, stepper, badge, toast as toastUI } from './ui.js';
+import * as D from './dominio.js';
+import { money, int, date, addDays, today, esc, sum, plural } from './core/fmt.js';
+import { icon, stepper, badge, toast as toastUI } from './core/ui.js';
+import { thumb } from './vinhos-ui.js';
 
 export function novoWizard(s, cid) {
   const est = D.saldoEstimado(s, cid);

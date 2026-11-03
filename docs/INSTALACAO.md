@@ -1,60 +1,49 @@
-# Colocar os apps no ar (uma vez só, ~10 minutos)
+# Colocar um app de segmento no ar (uma vez por segmento, ~15 minutos)
+
+Todos os apps de segmento ficam no **mesmo projeto Supabase, `easyapp-fabrica`** (organização EasyAPP, região São Paulo),
+cada um na sua **pasta** (schema), definida em `segmento.js › schema` (ex.: `frota`). Dentro da pasta, um único banco atende
+**todas as empresas** do segmento (cada uma só enxerga o que é dela). O EasyApp Financial fica no projeto dele, separado.
 
 ## 1. Publicar o site (GitHub Pages)
-1. No GitHub, abra o repositório **MilTerras** › **Settings** › **Pages**.
-2. Em **Build and deployment › Source**, escolha **GitHub Actions**.
-3. Pronto. A cada atualização o site é publicado sozinho em:
-   **https://rodrigopiratini.github.io/MilTerras/**
-   - Gestão: `…/MilTerras/gestor/`
-   - Parceiro: `…/MilTerras/cliente/`
-   - Demonstração (dados fictícios, só no navegador): `…/gestor/?demo=1` e `…/cliente/?demo=1`
+1. No GitHub, abra o repositório › **Settings** › **Pages** › **Build and deployment › Source: GitHub Actions**.
+2. A cada push na `main` o site é publicado sozinho em `https://<usuário>.github.io/<repositório>/`
+   - Gestão: `…/gestao/` · App do usuário: `…/usuario/` · Demonstração: `…/gestao/?demo=1` e `…/usuario/?demo=1`
+3. (Opcional) Endereço próprio, ex.: `frota.easyappfinancial.com.br`: crie um registro **CNAME** no DNS apontando para
+   `<usuário>.github.io`, crie o arquivo `CNAME` na raiz do repositório com o endereço e confirme em Settings › Pages › Custom domain.
 
-## 2. Criar o banco (Supabase, plano gratuito)
-1. Crie uma conta em https://supabase.com e clique em **New project**.
-   - Nome: `milterras` · Região: **South America (São Paulo)** · anote a senha do banco.
-2. **SQL Editor › New query**: cole todo o conteúdo de [`supabase/instalar.sql`](../supabase/instalar.sql) e clique em **Run**.
-   No final aparece o **CÓDIGO DE INSTALAÇÃO**: guarde-o (é usado para criar o acesso do gestor).
-3. **Authentication › Sign In / Providers**: ative **Allow anonymous sign-ins** (é assim que os parceiros entram com código + PIN).
-4. **Authentication › URL Configuration**: em **Site URL** coloque `https://rodrigopiratini.github.io/MilTerras/gestor/`.
-5. **Project Settings › API**: copie a **Project URL** e a **Publishable key** (ou "anon public").
-   ⚠️ Nunca compartilhe a chave `service_role`/`secret`.
+## 2. Instalar no banco (projeto easyapp-fabrica)
+1. **SQL Editor › New query**: cole todo o [`supabase/instalar.sql`](../supabase/instalar.sql) › **Run** (aparece "Instalação concluída").
+   Ele cria só a pasta do app; não mexe nas pastas dos outros apps.
+2. **Project Settings › Data API › Exposed schemas**: acrescente a pasta do app (ex.: `frota`) › **Save**.
+3. **Authentication › URL Configuration › Redirect URLs**: acrescente o endereço da Gestão do app (ex.: `https://…/gestao/**`).
+4. [`src/js/config.js`](../src/js/config.js): a **Project URL** e a **Publishable key** do easyapp-fabrica (as mesmas para todos os apps).
+   ⚠️ Nunca use a chave `service_role`/`secret` no app.
+5. Uma vez só no projeto: **Authentication › Sign In / Providers › Allow anonymous sign-ins** ligado (login por código + PIN).
 
-## 3. Ligar o app ao banco
-Cole a Project URL e a Publishable key em [`src/js/config.js`](../src/js/config.js) (ou envie para o Claude fazer isso). Depois da publicação:
+Mudar um app de projeto (ex.: trazer um app que tinha banco próprio): `node scripts/migrar-projeto.mjs --de <ref> --para <ref> [--schema …]`
+(ensaio por padrão; `--executar` grava). Copia as tabelas da pasta e os logins de e-mail com as senhas.
 
-1. Abra a Gestão › **Primeiro acesso** › seu e-mail, uma senha e o código de instalação.
-   - Se o Supabase pedir, confirme o e-mail pelo link recebido e entre novamente.
-2. Cadastre os parceiros (código + PIN de 4 números) e envie o acesso pelo WhatsApp em **Configurações**.
-3. Registre a primeira **Entrada** no estoque e as **remessas** para os parceiros.
+## 3. Você como administrador da plataforma
+Coloque seu e-mail em `plataforma.admins` no `src/js/segmento.js`, rode `node supabase/gerar.mjs` e rode o `instalar.sql` de novo
+(ou, direto no SQL Editor: `insert into plataforma_admins values ('seu@email.com');`).
+Na Gestão aparece o menu **Plataforma**: todas as empresas, situação (teste / ativa / suspensa), vencimento, uso e receita mensal.
 
-## Bom saber
-- **Custos:** o catálogo entra com custo provisório (50% do preço). Ajuste em **Rótulos › Editar**.
-- **Segurança:** cada parceiro só vê os próprios dados e não vê custos. Trocar o PIN de um parceiro desconecta os aparelhos dele. Após 5 PINs errados, o código fica bloqueado por 15 minutos.
-- **Sem internet:** vendas e alterações ficam na fila do aparelho e são enviadas quando a conexão voltar.
-- **Plano gratuito do Supabase:** o projeto é pausado após 7 dias sem nenhum acesso (basta reativar no painel). Com uso diário isso não acontece; para garantia total, o plano Pro custa US$ 25/mês.
-- **Backup:** Gestão › Configurações › Exportar backup (o Supabase também guarda backups diários no plano Pro).
+## 4. Primeiro cliente
+1. O cliente abre a Gestão › **Criar conta** (e-mail e senha) › **Criar minha empresa**: começa o período de teste.
+2. Ele cadastra a equipe e, em **Configurações › Acesso**, gera código + PIN de cada usuário e envia pelo WhatsApp.
+3. Sócios/escritório: **Configurações › Equipe de gestão › Convidar gestor** (código de uso único, 7 dias).
+
+## Cobrança (assinatura)
+- Em **Plataforma**, ao receber o pagamento, mude a empresa para **Ativa**, escolha o plano, o valor e **Pago até**.
+- Teste vencido, ou ativa com "pago até" vencido há mais de 5 dias: o banco **recusa gravações** e o app mostra o aviso.
+  Os dados continuam visíveis e exportáveis (nada é apagado).
+- Suspender: situação **Suspensa**. Reativar: **Ativa** com nova data.
 
 ## Atualizações do banco
-Quando uma nova versão pedir, cole de novo o `supabase/instalar.sql` inteiro no SQL Editor e clique em **Run**. É seguro: não apaga dados.
+Sempre que o `instalar.sql` mudar, cole-o inteiro de novo no SQL Editor › **Run**. É seguro: não apaga dados.
 
-## Dar acesso a um sócio ou funcionário (Gestão)
-1. Gestão › **Configurações › Equipe de gestão › Convidar gestor**.
-2. Envie o link e o código (vale 7 dias, uso único).
-3. A pessoa abre a Gestão › **Primeiro acesso**, cria e-mail e senha e informa o código.
-
-Papéis: **Dono** (você) administra a equipe; **Gestor** opera tudo, mas não pode remover o dono nem convidar/remover pessoas. Não adicione a pessoa ao Supabase nem como colaborador no GitHub: assim ela não tem acesso ao banco nem pode alterar o código.
-
-## Zerar a operação (manter só a carta de vinhos)
-Para apagar parceiros, estoque, remessas, vendas, fechamentos, pedidos e despesas e começar do zero:
-Supabase › **SQL Editor › New query**, cole todo o conteúdo de [`supabase/limpar.sql`](../supabase/limpar.sql) e clique em **Run**.
-Os rótulos (com preços e custos), as configurações e os acessos de gestão são mantidos. **Não tem volta**: exporte um backup antes se quiser guardar o histórico.
-
-## Condições de pagamento e preços especiais
-Em Gestão › **Parceiros › (parceiro) › Pagamento e preços**:
-- **Condições de pagamento**: combine formas, ex.: 40% em dinheiro + restante no cartão em 3x. O parceiro escolhe a condição no fechamento; ao registrar o recebimento os valores já vêm divididos (dá para ajustar e também registrar pagamento parcial).
-- **Preços especiais**: valor cobrado só daquele parceiro no lugar do preço de tabela, com data final opcional para promoções.
-
-## Registro de atividades (o que cada pessoa fez)
-Gestão › **Mais › Atividade** (só o **dono** vê). Mostra, por dia e por pessoa, cada ação no sistema: remessas, entradas, fechamentos aprovados, pagamentos, preços e custos alterados, cadastros, vendas e pedidos dos parceiros, e cada vez que alguém entra no app. Toque numa pessoa para ver só o que ela fez.
-
-O registro é gravado pelo próprio banco, então vale para qualquer aparelho e não pode ser apagado pelos gestores. Guarda 1 ano. Para ativar numa instalação existente, rode de novo o `supabase/instalar.sql` (veja acima).
+## Bom saber
+- **Plano gratuito do Supabase**: 2 projetos por conta e pausa após 7 dias sem acesso. Com clientes pagando, use o **Pro**
+  (US$ 25/mês por organização, cada projeto extra ~US$ 10/mês); confira os preços atuais em supabase.com/pricing.
+- **Sem internet**: as alterações ficam na fila do aparelho e são enviadas quando a conexão voltar.
+- **Registro de atividades**: Gestão › Atividade (só o dono). Gravado pelo banco, guarda 1 ano.

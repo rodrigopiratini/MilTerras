@@ -48,7 +48,7 @@ function xLabels(labels, x, h, pad, every = 1) {
 
 // Colunas verticais (uma série). data: [{label, value, tip?, color?}]
 function columns(spec, w, h) {
-  const { data, fmt = String, color = 'var(--bordo)' } = spec;
+  const { data, fmt = String, color = 'var(--primaria)' } = spec;
   const pad = { t: 12, r: 8, b: 26, l: spec.padL ?? 56 };
   const max = niceMax(Math.max(...data.map((d) => d.value), 0));
   const n = data.length || 1;
@@ -95,7 +95,7 @@ function line(spec, w, h) {
 export const legend = (items) => `<div class="legend">${items.map(([n, c]) => `<span><i style="background:${c}"></i>${esc(n)}</span>`).join('')}</div>`;
 
 // Barras horizontais em HTML (ranking). items: [{label, value, sub?, html?}]
-export function hbars(items, fmt = String, { color = 'var(--bordo)', max } = {}) {
+export function hbars(items, fmt = String, { color = 'var(--primaria)', max } = {}) {
   const m = max ?? Math.max(...items.map((i) => i.value), 1);
   return `<div class="hbars">${items.map((i) => `<div class="hb ${i.attrs ? 'click' : ''}" ${i.attrs || ''} data-tip="${esc(`<b>${i.label}</b><br>${fmt(i.value)}${i.sub ? '<br>' + i.sub : ''}`)}">
     <div class="ellipsis">${i.html || esc(i.label)}</div><div class="bar-t"><i style="width:${(100 * i.value) / m}%;background:${i.color || color}"></i></div><div class="v">${i.vtxt ?? fmt(i.value)}</div></div>`).join('')}</div>`;
@@ -108,7 +108,7 @@ export function heatmap(rows, cols, get, { rowLabel = (r) => r, colLabel = (c) =
     if (!v) return '<td style="background:#F6F1E9;color:#C8BDB2">·</td>';
     const t = v / max;
     const a = 0.12 + t * 0.88;
-    return `<td style="background:rgba(110,27,42,${a.toFixed(2)});color:${t > 0.45 ? '#fff' : 'var(--vinho)'}">${v}</td>`;
+    return `<td style="background:rgba(110,27,42,${a.toFixed(2)});color:${t > 0.45 ? '#fff' : 'var(--primaria-escura)'}">${v}</td>`;
   };
   return `<div class="tbl-wrap"><table class="heat"><thead><tr><th></th>${cols.map((c) => `<th>${esc(colLabel(c))}</th>`).join('')}</tr></thead>
     <tbody>${rows.map((r) => `<tr><th>${esc(rowLabel(r))}</th>${cols.map((c) => cell(get(r, c))).join('')}</tr>`).join('')}</tbody></table></div>`;

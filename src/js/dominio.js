@@ -2,7 +2,7 @@
 // Todas as funções recebem o estado (s) e não dependem de interface — o mesmo código
 // roda no app de Gestão, no app do Parceiro e na geração dos dados de demonstração.
 
-import { uid, today, addDays, diffDays, sum, monthKey, iso } from './fmt.js';
+import { uid, today, addDays, diffDays, sum, monthKey, iso } from './core/fmt.js';
 
 export const TIPOS_MOV = {
   entrada: { label: 'Entrada (compra/importação)', central: +1, cliente: 0 },
@@ -485,17 +485,25 @@ export function contasReceber(s) {
     .sort((a, b) => (a.vencimento < b.vencimento ? -1 : 1));
 }
 
+// Custo cadastrado do rótulo (coleção custos: só a gestão enxerga)
+export const custoDe = (s, pid) => +((s.custos || []).find((x) => x.produtoId === pid)?.custo ?? produto(s, pid)?.custo ?? 0) || 0;
+export function definirCusto(s, pid, custo) {
+  s.custos ||= [];
+  const x = s.custos.find((c) => c.produtoId === pid);
+  if (x) x.custo = +custo || 0; else s.custos.push({ id: 'cu-' + pid, produtoId: pid, custo: +custo || 0 });
+}
+
 // Custo médio de todos os rótulos de uma vez (evita recalcular dentro de laços)
 export function custosMedios(s) {
   const q = {}, v = {};
   for (const m of s.movs) if (m.tipo === 'entrada' && m.custoUnit) { q[m.produtoId] = (q[m.produtoId] || 0) + m.qtd; v[m.produtoId] = (v[m.produtoId] || 0) + m.qtd * m.custoUnit; }
-  return Object.fromEntries(s.produtos.map((p) => [p.id, q[p.id] ? v[p.id] / q[p.id] : p.custo || 0]));
+  return Object.fromEntries(s.produtos.map((p) => [p.id, q[p.id] ? v[p.id] / q[p.id] : custoDe(s, p.id)]));
 }
 
 export function custoMedio(s, pid) {
   const es = s.movs.filter((m) => m.tipo === 'entrada' && m.produtoId === pid && m.custoUnit);
   const q = sum(es, (m) => m.qtd);
-  return q ? sum(es, (m) => m.qtd * m.custoUnit) / q : produto(s, pid).custo;
+  return q ? sum(es, (m) => m.qtd * m.custoUnit) / q : custoDe(s, pid);
 }
 
 // Receita reconhecida = vendas apuradas nos fechamentos (consumo) + vendas diretas

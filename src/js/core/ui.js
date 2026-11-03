@@ -1,9 +1,10 @@
-// Componentes de interface compartilhados pelos dois apps
+// Componentes de interface compartilhados pelos dois apps (Gestão e Usuário)
 import { esc, money, int } from './fmt.js';
 import { VERSAO } from '../versao.js';
+import { SEGMENTO } from '../segmento.js';
 
 export const ROOT = new URL('../../../', import.meta.url).href;
-export const asset = (p) => (/^(data:|blob:|https?:)/.test(p || '') ? p : ROOT + (p || 'assets/logo/simbolo.png'));
+export const asset = (p) => (/^(data:|blob:|https?:)/.test(p || '') ? p : ROOT + (p || ''));  // fotos gravadas no próprio registro vêm como data:
 
 const P = {
   home: '<path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>',
@@ -42,6 +43,17 @@ const P = {
   swap: '<path d="M7 4 3 8l4 4M3 8h14M17 20l4-4-4-4M21 16H7"/>',
   clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
   info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.5"/>',
+  fuel: '<path d="M4 21V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v16M3 21h12M4 10h10M14 8h2a2 2 0 0 1 2 2v6a1.5 1.5 0 0 0 3 0V9l-3-3"/>',
+  wrench: '<path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2.8-.7-.7-2.8z"/>',
+  map: '<path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2zM9 4v14M15 6v14"/>',
+  user: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
+  file: '<path d="M14 3H6v18h12V7zM14 3v4h4M9 13h6M9 17h6"/>',
+  building: '<path d="M4 21V5l8-3v19M12 8h8v13M8 8v.5M8 12v.5M8 16v.5M16 12v.5M16 16v.5M2 21h20"/>',
+  shield: '<path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6z"/><path d="m9 12 2 2 4-4"/>',
+  play: '<path d="M7 4v16l13-8z"/>',
+  flag: '<path d="M5 21V4M5 4h12l-2 4 2 4H5"/>',
+  camera: '<path d="M4 8h3l2-3h6l2 3h3v12H4z"/><circle cx="12" cy="13" r="3.5"/>',
+  list: '<path d="M9 6h11M9 12h11M9 18h11M4 6h.5M4 12h.5M4 18h.5"/>',
   link: '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
 };
 export const icon = (n, cls = '') => `<svg class="${cls}" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${P[n] || ''}</svg>`;
@@ -120,9 +132,7 @@ export const kpi = (label, valor, detalhe = '', extra = '') => `<div class="card
 
 export const badge = (txt, tone = '') => `<span class="badge ${tone}">${esc(txt)}</span>`;
 
-export const empty = (txt, ic = 'wine') => `<div class="empty">${icon(ic)}<div>${txt}</div></div>`;
-
-export const thumb = (p, cls = '') => `<img class="thumb ${cls}" src="${asset(p.foto)}" alt="" loading="lazy">`;
+export const empty = (txt, ic = 'inbox') => `<div class="empty">${icon(ic)}<div>${txt}</div></div>`;
 
 export const stepper = (name, value, { min = 0, max = 999 } = {}) =>
   `<span class="stepper"><button type="button" data-act="step" data-d="-1" aria-label="Menos">−</button><input type="number" inputmode="numeric" data-onchange="qty" name="${name}" value="${value}" min="${min}" max="${max}"><button type="button" data-act="step" data-d="1" aria-label="Mais">+</button></span>`;
@@ -130,8 +140,19 @@ export const stepper = (name, value, { min = 0, max = 999 } = {}) =>
 // Campos de valor em reais com máscara (digita só números: 1234 → 12,34)
 export const fmtMoneyInput = (v) => (Math.round((+v || 0) * 100) / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 export const parseMoney = (str) => { const d = String(str ?? '').replace(/\D/g, ''); return d ? +d / 100 : 0; };
+// Inteiro com ponto de milhar enquanto digita (km, hodômetro…): <input data-int>
+export const fmtInt = (v) => (v === '' || v == null || isNaN(+v) ? '' : Math.round(+v).toLocaleString('pt-BR'));
+export const parseInt0 = (str) => { const d = String(str ?? '').replace(/\D/g, ''); return d ? +d : null; };
+export const intInput = (name, value, extra = '') => `<input class="input num" name="${name}" inputmode="numeric" autocomplete="off" data-int value="${fmtInt(value)}" ${extra}>`;
+document.addEventListener('input', (e) => {
+  const el = e.target;
+  if (!el.matches?.('input[data-int]')) return;
+  const fim = el.value.length - (el.selectionEnd ?? el.value.length);
+  el.value = fmtInt(parseInt0(el.value));
+  try { const pos = Math.max(0, el.value.length - fim); el.setSelectionRange(pos, pos); } catch {}
+});
 export const moneyInput = (name, value, { width = 130, extra = '' } = {}) =>
-  `<span class="money-in" style="width:${width}px"><span>R$</span><input class="input num" name="${name}" inputmode="numeric" autocomplete="off" data-money value="${fmtMoneyInput(value)}" ${extra}></span>`;
+  `<span class="money-in" style="width:${typeof width === 'number' ? width + 'px' : width}"><span>R$</span><input class="input num" name="${name}" inputmode="numeric" autocomplete="off" data-money value="${fmtMoneyInput(value)}" ${extra}></span>`;
 document.addEventListener('input', (e) => {
   const el = e.target;
   if (!el.matches?.('input[data-money]')) return;
@@ -149,22 +170,6 @@ export function stepHandler(el) {
 
 export const insightCard = (i) => `<a class="ins ${i.nivel}" href="${i.link || '#'}" data-busca="${esc(i.titulo + ' ' + i.texto)}"><span class="ic">${icon(i.icone)}</span><span class="grow"><div class="t">${esc(i.titulo)}</div><div class="s">${esc(i.texto)}</div></span>${i.valor ? `<span class="num small" style="font-weight:600">${money(i.valor)}</span>` : ''}</a>`;
 
-export const fichaVinho = (p, extra = '') => `
-  <div class="row top gap-l" style="align-items:flex-start">
-    <img src="${asset(p.foto)}" alt="" style="width:86px;height:250px;object-fit:contain;filter:drop-shadow(0 6px 8px rgba(0,0,0,.2))">
-    <div class="col grow" style="gap:8px">
-      <div class="row gap-s wrap"><span class="tag ${p.tipo}">${p.tipo}</span><span class="tag" style="color:var(--dourado)">${esc(p.regiao)}${p.classificacao ? ' · ' + p.classificacao : ''}</span></div>
-      <h2 style="font-size:22px">${esc(p.nome)}</h2>
-      <div class="serif" style="color:var(--bordo)">${esc(p.descricao)}</div>
-      <div class="grid g3 small" style="gap:8px;margin-top:4px">
-        <div><div class="label">Teor</div>${p.teor}</div><div><div class="label">Servir a</div>${p.servir}</div><div><div class="label">Safra</div>${p.safra}</div>
-      </div>
-      <div class="small"><div class="label">Uvas</div>${esc(p.uvas)}</div>
-      <div class="small" style="background:var(--bordo);color:#fff;border-radius:10px;padding:10px 12px"><div class="label" style="color:var(--dourado-claro)">Harmonização</div>${esc(p.harmonizacao)}</div>
-      ${extra}
-    </div>
-  </div>`;
-
 // Busca digitada: esconde elementos [data-busca] que não contêm o termo (sem acento/maiúscula)
 export const normalizar = (t) => String(t || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 export function filtrarBusca(root, termo) {
@@ -174,7 +179,6 @@ export function filtrarBusca(root, termo) {
 export const buscaInput = (valor = '', ph = 'Buscar…') => `<label class="search busca">${icon('search')}<input class="input" type="search" placeholder="${ph}" data-oninput="busca" value="${esc(valor)}" autocomplete="off"></label>`;
 
 export const iniciais = (n) => n.split(' ').map((x) => x[0]).slice(0, 2).join('').toUpperCase();
-export const qtdBadge = (q) => `<span class="badge ${q <= 0 ? 'crit' : q <= 2 ? 'warn' : ''}">${int(q)} un.</span>`;
 
 export function waLink(numero, texto) {
   const n = String(numero || '').replace(/\D/g, '');
@@ -213,11 +217,11 @@ export const instalado = () => matchMedia('(display-mode: standalone)').matches 
 export const ehCelular = () => matchMedia('(max-width: 900px)').matches && 'ontouchstart' in window;
 // Faixa “Instale o app” (celular, fora do app instalado, até a pessoa dispensar)
 export function bannerInstalar() {
-  let off = false; try { off = localStorage.getItem('mt-sem-banner-instalar') === '1'; } catch {}
+  let off = false; try { off = localStorage.getItem(SEGMENTO.id + '-sem-banner-instalar') === '1'; } catch {}
   if (off || instalado() || !ehCelular()) return '';
   return `<div class="demo-banner">${icon('download')}<span class="grow">Instale o app na tela inicial para abrir mais rápido.</span><a href="#" data-act="install"><b>Como instalar</b></a><a href="#" data-act="semBanner" aria-label="Dispensar">${icon('x')}</a></div>`;
 }
-export function dispensarBanner() { try { localStorage.setItem('mt-sem-banner-instalar', '1'); } catch {} }
+export function dispensarBanner() { try { localStorage.setItem(SEGMENTO.id + '-sem-banner-instalar', '1'); } catch {} }
 
 export function registerSW() {
   if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register(ROOT + 'sw.js').catch(() => {});
@@ -243,16 +247,16 @@ export async function verificarAtualizacao(avisarSeIgual = false) {
   return false;
 }
 function barraAtualizar() {
-  if (document.getElementById('mt-atualizar')) return;
+  if (document.getElementById('ea-atualizar')) return;
   const el = document.createElement('div');
-  el.id = 'mt-atualizar';
+  el.id = 'ea-atualizar';
   el.className = 'atualizar-bar';
   el.innerHTML = `${icon('refresh')}<span class="grow">Nova versão do app disponível</span><button class="btn sm">Atualizar</button>`;
   el.querySelector('button').addEventListener('click', atualizarApp);
   document.body.appendChild(el);
 }
 export async function atualizarApp() {
-  const b = document.querySelector('#mt-atualizar button');
+  const b = document.querySelector('#ea-atualizar button');
   if (b) { b.disabled = true; b.textContent = 'Atualizando…'; }
   try {
     const reg = await navigator.serviceWorker?.getRegistration(ROOT);
