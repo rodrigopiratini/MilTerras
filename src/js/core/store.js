@@ -43,7 +43,9 @@ export async function init(app) {
     onStatus: (s, n) => statusHook?.(s, n),
     onRecuperacao: () => recuperacaoHook?.(),
   });
-  return nuvem.iniciar();
+  const ok = await nuvem.iniciar();
+  if (nuvem.suporte?.modo === 'leitura') somenteLeitura = true; // suporte só olhando: nada é gravado
+  return ok;
 }
 
 export function get() {
