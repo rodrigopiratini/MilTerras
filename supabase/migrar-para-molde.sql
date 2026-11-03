@@ -136,6 +136,8 @@ create table if not exists milterras.convites (
   usado_por uuid references auth.users(id) on delete set null,
   usado_em timestamptz
 );
+-- papel de quem usar o convite: gestor (usuário da Gestão, convidado pelo dono) ou dono (convite feito pelo desenvolvedor na Plataforma)
+alter table milterras.convites add column if not exists papel text not null default 'gestor' check (papel in ('dono', 'gestor'));
 
 create table if not exists milterras.tentativas_login (
   codigo text primary key,
@@ -369,8 +371,19 @@ begin
   select * into v_conv from milterras.convites where codigo = upper(trim(p_codigo)) and usado_por is null and expira_em > now() for update;
   if v_conv.codigo is null then return false; end if;
   update milterras.convites set usado_por = auth.uid(), usado_em = now() where codigo = v_conv.codigo;
-  insert into milterras.perfis (user_id, empresa_id, papel) values (auth.uid(), v_conv.empresa_id, 'gestor');
+  insert into milterras.perfis (user_id, empresa_id, papel) values (auth.uid(), v_conv.empresa_id, coalesce(v_conv.papel, 'gestor'));
   return true;
+end $$;
+
+-- Desenvolvedor (administrador da plataforma): convite de DONO para uma empresa (ex.: empresa criada para o cliente)
+create or replace function milterras.plataforma_convite_dono(p_empresa uuid) returns text
+language plpgsql security definer set search_path = milterras, public, extensions as $$
+declare v_codigo text := milterras.gerar_codigo(8);
+begin
+  if not milterras.eh_admin() then raise exception 'Sem permissão'; end if;
+  if not exists (select 1 from milterras.empresas where id = p_empresa) then raise exception 'Empresa não encontrada'; end if;
+  insert into milterras.convites (codigo, empresa_id, nome, criado_por, papel) values (v_codigo, p_empresa, 'Convite de dono', auth.uid(), 'dono');
+  return v_codigo;
 end $$;
 
 -- Usuário do app de campo: login anônimo + código + PIN (bloqueio após 5 erros)
@@ -543,7 +556,7 @@ do $$ declare f text; begin
   foreach f in array array['criar_empresa(text)', 'entrar_convite(text)', 'vincular_usuario(text, text)', 'criar_convite(text)', 'equipe()',
     'remover_gestor(uuid)', 'cancelar_convite(text)', 'registrar_acesso()', 'sinal()', 'atividade_log(timestamptz, uuid, timestamptz, int)',
     'plataforma_empresas()', 'plataforma_atualizar(uuid, text, text, date, date, numeric, text)', 'meu_perfil()',
-    'suporte_abrir(uuid, text)', 'suporte_sair()'] loop
+    'suporte_abrir(uuid, text)', 'suporte_sair()', 'plataforma_convite_dono(uuid)'] loop
     execute format('revoke all on function milterras.%s from public, anon', f);
     execute format('grant execute on function milterras.%s to authenticated', f);
   end loop;
@@ -718,9 +731,21 @@ begin
   alter table milterras.acessos disable trigger tg_atividade;
   alter table milterras.perfis disable trigger tg_atividade;
 
-  -- quem entra na Gestão (dono e gestores); aparelhos de parceiros entram de novo com código + PIN
+  -- administradores da plataforma (desenvolvedor): os mesmos dos outros apps da fábrica
+  if exists (select 1 from pg_tables where schemaname = 'frota' and tablename = 'plataforma_admins') then
+    insert into milterras.plataforma_admins (email) select email from frota.plataforma_admins on conflict do nothing;
+  end if;
+
+  -- quem entra na Gestão (dono e usuários); aparelhos de parceiros entram de novo com código + PIN.
+  -- O desenvolvedor não fica como dono nem usuário (abre a empresa pela Plataforma); se ele era o dono,
+  -- o usuário mais antigo passa a ser o dono.
   insert into milterras.perfis (user_id, empresa_id, papel, criado_em)
-  select user_id, v_emp, papel, criado_em from milterras_antigo.perfis where papel in ('dono', 'gestor');
+  select p.user_id, v_emp, p.papel, p.criado_em from milterras_antigo.perfis p join auth.users u on u.id = p.user_id
+   where p.papel in ('dono', 'gestor') and lower(coalesce(u.email, '')) not in (select lower(email) from milterras.plataforma_admins);
+  if not exists (select 1 from milterras.perfis where empresa_id = v_emp and papel = 'dono') then
+    update milterras.perfis set papel = 'dono' where user_id = (select user_id from milterras.perfis where empresa_id = v_emp order by criado_em limit 1);
+  end if;
+  update milterras.empresas set criado_por = (select user_id from milterras.perfis where empresa_id = v_emp and papel = 'dono' limit 1) where id = v_emp;
 
   -- documentos
   insert into milterras.docs (empresa_id, id, colecao, data)
@@ -753,11 +778,6 @@ begin
   alter table milterras.docs enable trigger tg_atividade;
   alter table milterras.acessos enable trigger tg_atividade;
   alter table milterras.perfis enable trigger tg_atividade;
-
-  -- administradores da plataforma: os mesmos dos outros apps da fábrica
-  if exists (select 1 from pg_tables where schemaname = 'frota' and tablename = 'plataforma_admins') then
-    insert into milterras.plataforma_admins (email) select email from frota.plataforma_admins on conflict do nothing;
-  end if;
 
   -- painel da fábrica: Mil Terras agora é multiempresa, com a Gestão em /gestao/
   if exists (select 1 from pg_tables where schemaname = 'public' and tablename = 'fabrica_apps') then

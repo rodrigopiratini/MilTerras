@@ -93,6 +93,8 @@ create table if not exists public.convites (
   usado_por uuid references auth.users(id) on delete set null,
   usado_em timestamptz
 );
+-- papel de quem usar o convite: gestor (usuário da Gestão, convidado pelo dono) ou dono (convite feito pelo desenvolvedor na Plataforma)
+alter table public.convites add column if not exists papel text not null default 'gestor' check (papel in ('dono', 'gestor'));
 
 create table if not exists public.tentativas_login (
   codigo text primary key,
@@ -326,8 +328,19 @@ begin
   select * into v_conv from public.convites where codigo = upper(trim(p_codigo)) and usado_por is null and expira_em > now() for update;
   if v_conv.codigo is null then return false; end if;
   update public.convites set usado_por = auth.uid(), usado_em = now() where codigo = v_conv.codigo;
-  insert into public.perfis (user_id, empresa_id, papel) values (auth.uid(), v_conv.empresa_id, 'gestor');
+  insert into public.perfis (user_id, empresa_id, papel) values (auth.uid(), v_conv.empresa_id, coalesce(v_conv.papel, 'gestor'));
   return true;
+end $$;
+
+-- Desenvolvedor (administrador da plataforma): convite de DONO para uma empresa (ex.: empresa criada para o cliente)
+create or replace function public.plataforma_convite_dono(p_empresa uuid) returns text
+language plpgsql security definer set search_path = public as $$
+declare v_codigo text := public.gerar_codigo(8);
+begin
+  if not public.eh_admin() then raise exception 'Sem permissão'; end if;
+  if not exists (select 1 from public.empresas where id = p_empresa) then raise exception 'Empresa não encontrada'; end if;
+  insert into public.convites (codigo, empresa_id, nome, criado_por, papel) values (v_codigo, p_empresa, 'Convite de dono', auth.uid(), 'dono');
+  return v_codigo;
 end $$;
 
 -- Usuário do app de campo: login anônimo + código + PIN (bloqueio após 5 erros)
@@ -500,7 +513,7 @@ do $$ declare f text; begin
   foreach f in array array['criar_empresa(text)', 'entrar_convite(text)', 'vincular_usuario(text, text)', 'criar_convite(text)', 'equipe()',
     'remover_gestor(uuid)', 'cancelar_convite(text)', 'registrar_acesso()', 'sinal()', 'atividade_log(timestamptz, uuid, timestamptz, int)',
     'plataforma_empresas()', 'plataforma_atualizar(uuid, text, text, date, date, numeric, text)', 'meu_perfil()',
-    'suporte_abrir(uuid, text)', 'suporte_sair()'] loop
+    'suporte_abrir(uuid, text)', 'suporte_sair()', 'plataforma_convite_dono(uuid)'] loop
     execute format('revoke all on function public.%s from public, anon', f);
     execute format('grant execute on function public.%s to authenticated', f);
   end loop;

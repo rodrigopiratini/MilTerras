@@ -18,7 +18,9 @@ import { CONFIG } from '../config.js';
 // Segmento sem app de campo (só Gestão): SEGMENTO.usuario = null
 const TEM_USUARIO = !!SEGMENTO.usuario;
 const U = SEGMENTO.usuario || { papel: 'Usuário', papelPlural: 'Usuários', curto: 'Usuário', nome: '', colecao: null };
-const PAPEL = { dono: 'Dono', gestor: 'Gestor', usuario: U.papel, suporte: 'Suporte' };
+// Níveis: desenvolvedor (administrador da plataforma: Plataforma › Ver / Corrigir), dono e usuário (papel 'gestor' no banco),
+// e, se o segmento tiver, o usuário do app de campo (código + PIN: motorista, parceiro…)
+const PAPEL = { dono: 'Dono', gestor: 'Usuário', usuario: U.papel, suporte: 'Desenvolvedor (suporte)' };
 
 export function criarApp(def) {
   const tipo = def.tipo; // 'gestao' | 'usuario'
@@ -204,7 +206,7 @@ export function criarApp(def) {
   // abrir o app de campo de um usuário como ele vê (só leitura)
   const linkVer = (ref) => { const u = new URL('../usuario/', location.href); u.searchParams.set('ver', ref); if (store.modo === 'local') u.searchParams.set('demo', '1'); return u.href; };
   const msgAcesso = (a, doc) => `Olá${doc?.nome ? ', ' + String(doc.nome).split(' ')[0] : ''}! Este é o app ${SEGMENTO.usuario.nome} da ${store.empresa()?.nome || S().meta.empresa || ''}:\n${linkUsuario()}\n\nCódigo: ${a.codigo}\nPIN: ${a.pin}\n\nPara instalar como app:\n• iPhone: abra o link no Safari › Compartilhar › Adicionar à Tela de Início\n• Android: abra no Chrome › menu ⋮ › Instalar app`;
-  const msgConvite = (codigo) => `Convite para a ${SEGMENTO.gestao.nome} (${store.empresa()?.nome || ''}):\n${new URL('../gestao/', location.href).href}\n\n1. Toque em "Criar conta" e use seu e-mail\n2. Depois toque em "Entrar com convite"\n3. Código: ${codigo}\n\nO convite vale por 7 dias e pode ser usado uma única vez.`;
+  const msgConvite = (codigo, empresa = store.empresa()?.nome || '', dono = false) => `Convite${dono ? ' de dono' : ''} para a ${SEGMENTO.gestao.nome} (${empresa}):\n${new URL('../gestao/', location.href).href}\n\n1. Toque em "Criar conta" e use seu e-mail\n2. Depois toque em "Entrar com convite"\n3. Código: ${codigo}\n\nO convite vale por 7 dias e pode ser usado uma única vez.`;
 
   async function pintarAcessos() {
     const el = document.getElementById('ea-acessos');
@@ -265,8 +267,8 @@ export function criarApp(def) {
             ${campos.map(([k, label, ph = '']) => `<label class="field"><span>${label}</span><input class="input" name="${k}" value="${esc(s.meta[k] || '')}" placeholder="${esc(ph)}"></label>`).join('')}
             ${nuvem ? '' : `<label class="field"><span>PIN da gestão (demonstração)</span><input class="input" name="pinGestao" inputmode="numeric" maxlength="4" value="${esc(s.meta.pinGestao || '0000')}"></label>`}
             <button class="btn">Salvar</button></form></div>
-          ${nuvem ? `<div class="card col"><h2>Equipe de gestão</h2><div id="ea-equipe" class="small muted">Carregando…</div>
-            ${store.ehDono() ? `<button class="btn ghost" data-act="convidar">${icon('plus')} Convidar gestor (sócio, escritório)</button><div class="tiny muted">O convidado acessa toda a Gestão, mas não convida nem remove pessoas.</div>` : '<div class="tiny muted">Somente o dono convida ou remove gestores.</div>'}</div>` : ''}
+          ${nuvem ? `<div class="card col"><h2>Pessoas na Gestão</h2><div id="ea-equipe" class="small muted">Carregando…</div>
+            ${store.ehDono() ? `<button class="btn ghost" data-act="convidar">${icon('plus')} Convidar usuário (sócio, escritório)</button><div class="tiny muted">O usuário acessa toda a Gestão, mas não convida nem remove pessoas e não vê o registro de atividades.</div>` : '<div class="tiny muted">Somente o dono convida ou remove usuários.</div>'}</div>` : ''}
           <div class="card col"><h2>Dados</h2>
             ${nuvem ? `<div class="small ink2">${icon('check')} Conectado à nuvem. Os dados ficam disponíveis em qualquer aparelho, em tempo real. Seu acesso: <b>${PAPEL[store.perfil()?.papel] || ''}</b>.</div>
               <div class="row wrap"><button class="btn ghost" data-act="backup">${icon('download')} Exportar backup</button><button class="btn ghost" data-act="install">${icon('download')} Instalar app</button><a class="btn ghost" href="?demo=1" target="_blank" rel="noopener">${icon('spark')} Demonstração</a></div>`
@@ -400,9 +402,15 @@ export function criarApp(def) {
       <label class="field"><span>Pago até</span><input class="input" type="date" name="pagoAte" value="${e.pagoAte || ''}"></label>
       <label class="field"><span>Valor mensal</span>${moneyInput('valor', e.valorMensal || 0)}</label></div>
       <label class="field"><span>Observações</span><textarea class="input" name="obs">${esc(e.obs || '')}</textarea></label>
-      <div class="tiny muted">Dono: ${esc(e.dono || '—')} · criada em ${date(e.criadoEm.slice(0, 10))} · ${int(e.gestores)} gestor(es), ${int(e.usuarios)} usuário(s), ${int(e.registros)} registros. Ativa com "pago até" vencido há mais de 5 dias bloqueia as gravações.</div></form>`,
-      foot: `<button class="btn ghost" data-act="close">Cancelar</button><button class="btn" data-act="ok">Salvar</button>`,
-      handlers: { ok: async () => {
+      <div class="tiny muted">Dono: ${esc(e.dono || '—')} · criada em ${date(e.criadoEm.slice(0, 10))} · ${int(e.gestores)} na Gestão (dono e usuários), ${int(e.usuarios)} no app de campo, ${int(e.registros)} registros. Ativa com "pago até" vencido há mais de 5 dias bloqueia as gravações.</div></form>`,
+      foot: `<button class="btn ghost" data-act="conviteDono" style="margin-right:auto">${icon('plus')} Convite de dono</button><button class="btn ghost" data-act="close">Cancelar</button><button class="btn" data-act="ok">Salvar</button>`,
+      handlers: { conviteDono: async () => {
+        try {
+          const c = await store.rpc('plataforma_convite_dono', { p_empresa: id });
+          modal({ title: 'Convite de dono', body: `<div class="col"><div class="small">Quem usar este convite vira <b>dono</b> de ${esc(e.nome)}. Vale 7 dias, uma vez só.</div><div class="grande center">${esc(c)}</div>
+            <a class="btn" target="_blank" rel="noopener" href="${waLink('', msgConvite(c, e.nome, true))}">${icon('whatsapp')} Enviar pelo WhatsApp</a></div>` });
+        } catch (err) { toast(err.message); }
+      }, ok: async () => {
         const f = lerForm('fpl');
         try {
           await store.rpc('plataforma_atualizar', { p_empresa: id, p_situacao: f.situacao, p_plano: f.plano, p_teste_ate: f.testeAte || null, p_pago_ate: f.pagoAte || null, p_valor: parseMoney(f.valor) || null, p_obs: f.obs });
@@ -438,6 +446,8 @@ export function criarApp(def) {
     current = { view, params, pattern };
     resetCharts();
     const ok = logado();
+    // desenvolvedor sem empresa (o normal): vai direto para a Plataforma
+    if (gestao && !ok && store.ehAdmin() && pattern !== '/plataforma' && store.modo === 'nuvem') { location.hash = '#/plataforma'; return; }
     const adminSolto = gestao && pattern === '/plataforma' && store.ehAdmin();
     store.setSomenteLeitura(!!(ok && ((store.empresa() && !store.empresa().liberada) || store.suporte()?.modo === 'leitura' || (!gestao && store.espelho))));
     root.innerHTML = ok || adminSolto ? view(params) : gestao ? vLoginGestao() : vLoginUsuario();
@@ -499,7 +509,7 @@ export function criarApp(def) {
     trocarPin: async (el) => { if (!(await confirmar('Gerar um PIN novo? Os aparelhos conectados com o PIN atual serão desconectados.', { ok: 'Gerar PIN' }))) return; try { await store.acessos.trocarPin(el.dataset.ref); toast('PIN trocado'); pintarAcessos(); } catch (e) { toast(e.message); } },
     bloquearAcesso: async (el) => { try { await store.acessos.ativar(el.dataset.ref, el.dataset.v === '1'); toast(el.dataset.v === '1' ? 'Acesso liberado' : 'Acesso bloqueado'); pintarAcessos(); } catch (e) { toast(e.message); } },
     copiarAcesso: (el) => { const a = document.getElementById('ea-acessos')._lista.find((x) => x.ref === el.dataset.ref); const d = S()[U.colecao].find((x) => x.id === el.dataset.ref); navigator.clipboard?.writeText(msgAcesso(a, d)); toast('Mensagem copiada'); },
-    convidar: () => modal({ title: 'Convidar gestor', body: '<form id="fcv" class="col"><label class="field"><span>Nome (para você lembrar)</span><input class="input" name="nome"></label></form>', foot: '<button class="btn" data-act="ok">Gerar convite</button>',
+    convidar: () => modal({ title: 'Convidar usuário', body: '<form id="fcv" class="col"><label class="field"><span>Nome (para você lembrar)</span><input class="input" name="nome"></label></form>', foot: '<button class="btn" data-act="ok">Gerar convite</button>',
       handlers: { ok: async () => { try { const c = await store.rpc('criar_convite', { p_nome: new FormData(document.getElementById('fcv')).get('nome') }); closeModal(); pintarEquipe();
         modal({ title: 'Convite criado', body: `<div class="col"><div class="grande center">${esc(c)}</div><a class="btn" target="_blank" rel="noopener" href="${waLink('', msgConvite(c))}">${icon('whatsapp')} Enviar pelo WhatsApp</a></div>` }); } catch (e) { toast(e.message); } } } }),
     removerGestor: async (el) => { if (!(await confirmar(`Remover o acesso de ${esc(el.dataset.e)}?`, { ok: 'Remover' }))) return; try { await store.rpc('remover_gestor', { p_user: el.dataset.u }); pintarEquipe(); toast('Acesso removido'); } catch (e) { toast(e.message); } },
