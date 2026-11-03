@@ -9,6 +9,7 @@ const PAGINA = 1000;
 
 export function criarNuvem(app, hooks) {
   const sb = window.supabase.createClient(CONFIG.supabaseUrl, CONFIG.supabaseKey, {
+    db: { schema: CONFIG.schema || 'public' }, // pasta da Mil Terras no banco da fábrica
     auth: { storageKey: `mt-auth-${app}`, persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
   });
   const OUTBOX = `mt-outbox-${app}`;
@@ -149,7 +150,7 @@ export function criarNuvem(app, hooks) {
     canal?.unsubscribe();
     canal = sb.channel('mt-' + app);
     for (const t of [...TABELAS, 'config']) {
-      canal.on('postgres_changes', { event: '*', schema: 'public', table: t }, (p) => {
+      canal.on('postgres_changes', { event: '*', schema: CONFIG.schema || 'public', table: t }, (p) => {
         if (!state) return;
         if (t === 'config') { if (p.new?.data) { state.meta = { ...state.meta, ...p.new.data }; snap.meta = JSON.stringify(state.meta); hooks.onChange?.('config', true); } return; }
         const id = p.new?.id || p.old?.id;

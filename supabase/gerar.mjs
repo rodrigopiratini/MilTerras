@@ -7,11 +7,11 @@ const q = (s) => `'${String(s).replace(/'/g, "''")}'`;
 const linhas = [];
 for (const p of PRODUTOS) {
   const { custo, ...data } = p;
-  linhas.push(`insert into public.produtos (id, data) values (${q(p.id)}, ${q(JSON.stringify(data))}::jsonb) on conflict (id) do nothing;`);
-  linhas.push(`insert into public.custos (id, custo) values (${q(p.id)}, ${custo}) on conflict (id) do nothing;`);
+  linhas.push(`insert into milterras.produtos (id, data) values (${q(p.id)}, ${q(JSON.stringify(data))}::jsonb) on conflict (id) do nothing;`);
+  linhas.push(`insert into milterras.custos (id, custo) values (${q(p.id)}, ${custo}) on conflict (id) do nothing;`);
 }
 const config = { empresa: 'Mil Terras', whatsapp: '5554991165105', instagram: '@milterrasvinhos' };
-linhas.push(`insert into public.config (id, data) values ('geral', ${q(JSON.stringify(config))}::jsonb) on conflict (id) do nothing;`);
+linhas.push(`insert into milterras.config (id, data) values ('geral', ${q(JSON.stringify(config))}::jsonb) on conflict (id) do nothing;`);
 
 const base = readFileSync(new URL('./setup.sql', import.meta.url), 'utf8');
 const out = base.replace('\\ir catalogo.sql', linhas.join('\n'));

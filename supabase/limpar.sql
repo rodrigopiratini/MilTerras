@@ -9,26 +9,26 @@
 -- Faça antes um backup em Gestão › Configurações › Exportar backup, se quiser guardar o histórico.
 -- =====================================================================
 begin;
-delete from public.vendas;
-delete from public.movs;
-delete from public.fechamentos;
-delete from public.pedidos;
-delete from public.despesas;
-delete from public.perfis where papel = 'parceiro';
-delete from public.clientes;
-delete from public.tentativas_login;
+delete from milterras.vendas;
+delete from milterras.movs;
+delete from milterras.fechamentos;
+delete from milterras.pedidos;
+delete from milterras.despesas;
+delete from milterras.perfis where papel = 'parceiro';
+delete from milterras.clientes;
+delete from milterras.tentativas_login;
 -- contas anônimas que os aparelhos dos parceiros usavam para entrar
-delete from auth.users u where u.is_anonymous and not exists (select 1 from public.perfis p where p.user_id = u.id);
+delete from auth.users u where u.is_anonymous and not exists (select 1 from milterras.perfis p where p.user_id = u.id);
 -- registro de atividades: troca as milhares de exclusões acima por uma única linha
 do $$ begin
-  if to_regclass('public.atividade') is not null then
-    delete from public.atividade where em = now() and acao = 'delete';
-    insert into public.atividade (quem, acao) values ('Sistema (painel do Supabase)', 'zerou');
+  if to_regclass('milterras.atividade') is not null then
+    delete from milterras.atividade where em = now() and acao = 'delete';
+    insert into milterras.atividade (quem, acao) values ('Sistema (painel do Supabase)', 'zerou');
   end if;
 end $$;
 commit;
 
-select (select count(*) from public.produtos) as rotulos_mantidos,
-       (select count(*) from public.clientes) as parceiros,
-       (select count(*) from public.movs) as movimentacoes,
-       (select count(*) from public.fechamentos) as fechamentos;
+select (select count(*) from milterras.produtos) as rotulos_mantidos,
+       (select count(*) from milterras.clientes) as parceiros,
+       (select count(*) from milterras.movs) as movimentacoes,
+       (select count(*) from milterras.fechamentos) as fechamentos;
