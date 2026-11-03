@@ -3,7 +3,7 @@ import { esc, money, int } from './fmt.js';
 import { VERSAO } from '../versao.js';
 
 export const ROOT = new URL('../../../', import.meta.url).href;
-export const asset = (p) => ROOT + p;
+export const asset = (p) => (/^(data:|blob:|https?:)/.test(p || '') ? p : ROOT + (p || 'assets/logo/simbolo.png'));
 
 const P = {
   home: '<path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>',
