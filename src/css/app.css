@@ -1,6 +1,8 @@
 /* Mil Terras — interface dos apps (Manual da Marca: bordô, vinho escuro, dourado, creme, carvão; Poppins + Inter) */
 :root {
   --bordo: #6E1B2A;
+  /* nomes do núcleo da fábrica (assistente.js) */
+  --primaria: #6E1B2A; --primaria-escura: #4A1019; --destaque: #B8925A; --fundo: #FBF7F0;
   --vinho: #4A1019;
   --dourado: #B8925A;
   --dourado-claro: #E9DCC6;

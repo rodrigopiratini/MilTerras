@@ -57,6 +57,7 @@ export function get() {
 // Aplica uma alteração e avisa as telas (e os outros aparelhos / abas)
 let somenteLeitura = false;
 export const setSomenteLeitura = (v) => { somenteLeitura = v; };
+export const somenteLeituraAtiva = () => somenteLeitura;
 export function commit(mutator, msg) {
   if (somenteLeitura) { erroHook?.('modo visualização — alterações desativadas'); return; }
   const s = get();
@@ -84,6 +85,8 @@ export const cadastrarGestor = (e, s) => nuvem.cadastrarGestor(e, s);
 export const ativarGestor = (c) => nuvem.ativarGestor(c);
 export const entrarParceiro = (c, p) => nuvem.entrarParceiro(c, p);
 export const sair = () => nuvem?.sair();
+// Login atual (para o assistente, chamado com fetch)
+export const token = async () => (modo === 'nuvem' ? (await nuvem?.sb.auth.getSession())?.data?.session?.access_token || null : null);
 export const sessaoAtiva = async () => !!(await nuvem?.sb.auth.getSession())?.data?.session;
 export const recarregar = () => nuvem?.recarregar();
 export const rpc = (fn, args) => nuvem.rpc(fn, args);

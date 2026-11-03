@@ -6,6 +6,7 @@ import { money, money0, moneyK, int, percent, date, dateShort, relDays, today, a
 import { icon, router, delegate, modal, closeModal, confirmar, toast, kpi, badge, empty, thumb, stepper, stepHandler, insightCard, fichaVinho, iniciais, qtdBadge, waLink, download, toCSV, asset, instalar, bannerInstalar, dispensarBanner, registerSW, verificarAtualizacao, versaoApp, moneyInput, parseMoney, filtrarBusca, buscaInput } from '../core/ui.js';
 import { chart, mountCharts, resetCharts, legend, hbars } from '../core/charts.js';
 import { novoWizard, renderWizard, wizardHandlers, statusBadge, ajustesHTML, acertosHTML } from '../core/fechamento-ui.js';
+import { criarIA, extrasGestao } from '../core/ia.js';
 
 const app = document.getElementById('app');
 const S = () => store.get();
@@ -32,6 +33,51 @@ const TABS = [['#/painel', 'chart', 'Painel'], ['#/estoque', 'box', 'Estoque'], 
 let current = { view: null, params: {}, pattern: '' };
 let handlers = {};
 
+// ---------- Assistente (IA) e botão + ----------
+const IA_SVG = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></svg>';
+const COL_IA = { produtos: ['Rótulos', true], clientes: ['Parceiros', true], movs: ['Movimentações de estoque', true], vendas: ['Vendas registradas pelos parceiros', false],
+  fechamentos: ['Fechamentos', false], pedidos: ['Pedidos de reposição dos parceiros', false], despesas: ['Despesas', true] };
+const ia = criarIA({
+  app: 'gestao',
+  colecoes: () => Object.fromEntries(Object.entries(COL_IA).map(([k, [nome, escrita]]) => [k, { nome, escrita: escrita && !store.somenteLeituraAtiva() }])),
+  extras: () => extrasGestao(S()), visivel: () => S(), quem: () => store.perfil()?.email || '',
+  sugestoes: () => ({
+    '/painel': ['Como foi este mês comparado com o anterior?', 'Quais parceiros mais venderam este mês?'],
+    '/aovivo': ['O que mais vendeu hoje?'],
+    '/estoque': ['Quais rótulos estão acabando no estoque central?', 'Quanto vale o estoque central a preço de parceiro?'],
+    '/consignacao': ['Qual parceiro tem mais garrafas paradas?', 'Quanto tenho em consignação no total?'],
+    '/remessas': ['Quais remessas ainda não foram entregues?'],
+    '/parceiros': ['Quais parceiros estão com o fechamento atrasado?', 'Qual parceiro vende mais por mês?'],
+    '/parceiro/:id': ['Como está este parceiro: vendas, estoque e pagamentos?'],
+    '/fechamentos': ['Quais fechamentos estão aguardando aprovação?'],
+    '/financeiro': ['Quem está devendo e há quantos dias?', 'Onde estou gastando mais?'],
+    '/inteligencia': ['Que rótulos devo repor em cada parceiro?'],
+    '/produtos': ['Qual rótulo dá mais margem?', 'Quais rótulos venderam menos nos últimos 60 dias?'],
+  }[current.pattern] || []),
+});
+function maisGestor(rota, p) {
+  const it = (icone, texto, act, dados) => ({ icone, texto, act, dados });
+  const estoque = [it('plus', 'Entrada de estoque', 'mov', { t: 'entrada' }), it('truck', 'Nova remessa', 'remessa'), it('swap', 'Venda direta', 'mov', { t: 'venda_direta' })];
+  if (rota === '/parceiro/:id') return [it('truck', 'Remessa para este parceiro', 'remessa', { c: p.id }), it('swap', 'Devolução deste parceiro', 'devolucao', { c: p.id }), it('money', 'Nova condição de pagamento', 'condNova', { c: p.id }), it('link', 'Ver o app do parceiro', 'abrirApp', { c: p.id })];
+  return {
+    '/painel': [...estoque, it('receipt', 'Novo fechamento', 'novoFech')],
+    '/estoque': [...estoque, it('refresh', 'Ajuste de inventário', 'mov', { t: 'ajuste' })],
+    '/consignacao': [it('truck', 'Nova remessa', 'remessa')], '/remessas': [it('truck', 'Nova remessa', 'remessa')],
+    '/parceiros': [it('store', 'Novo parceiro', 'editCliente')],
+    '/fechamentos': [it('receipt', 'Novo fechamento', 'novoFech')],
+    '/financeiro': [it('money', 'Nova despesa', 'despesa')],
+    '/produtos': [it('bottle', 'Novo rótulo', 'editProduto')],
+  }[rota] || estoque;
+}
+function escolherMais(x) {
+  if (x.h) { location.hash = x.h; return; }
+  const fn = handlers[x.act] || common[x.act];
+  if (!fn) return;
+  const el = document.createElement('button');
+  Object.entries(x.dados || {}).forEach(([k, v]) => { el.dataset[k] = v; });
+  fn(el, new Event('click'));
+}
+
 // ---------- Shell ----------
 function shell(title, content, { back } = {}) {
   const s = S();
@@ -44,13 +90,15 @@ function shell(title, content, { back } = {}) {
     <aside class="side">
       <div class="brand"><img src="${asset('assets/logo/logo_h_negativo.png')}" alt="Mil Terras"><div class="who">Gestão</div></div>
       ${navItens().map(([h, ic, n]) => `<a class="nav-a ${isOn(h) ? 'on' : ''}" href="${h}">${icon(ic)}<span>${n}</span>${b(h)}</a>`).join('')}
+      <a class="nav-a" href="#" data-act="eaiAbrir">${icon('spark')}<span>Assistente</span></a>
       <div class="foot">${syncBadge()}<br><a href="#" data-act="logout" style="color:#C9B3AC">Sair</a></div>
     </aside>
     <div>
-      <header class="topbar">${back ? `<button data-act="back" aria-label="Voltar">${icon('arrowL')}</button>` : `<img src="${asset('assets/logo/simbolo_negativo.png')}" alt="">`}<div class="t ellipsis">${title}</div><a href="#/fechamentos" style="color:#fff;position:relative">${icon('inbox')}${pend ? `<span class="badge dot" style="position:absolute;top:-6px;right:-8px">${pend}</span>` : ''}</a></header>
+      <header class="topbar">${back ? `<button data-act="back" aria-label="Voltar">${icon('arrowL')}</button>` : `<img src="${asset('assets/logo/simbolo_negativo.png')}" alt="">`}<div class="t ellipsis">${title}</div><a href="#/fechamentos" style="color:#fff;position:relative">${icon('inbox')}${pend ? `<span class="badge dot" style="position:absolute;top:-6px;right:-8px">${pend}</span>` : ''}</a><button class="eai-topo" data-act="eaiAbrir" aria-label="Assistente" title="Assistente" style="color:#fff">${IA_SVG}</button></header>
       <main class="main">${content}</main>
     </div>
     <nav class="tabbar">${TABS.map(([h, ic, n]) => `<a href="${h}" class="${isOn(h) ? 'on' : ''}">${icon(ic)}<span>${n}</span>${b(h)}</a>`).join('')}</nav>
+    <button class="eai-fab" data-act="eaiMais" aria-label="Ações e assistente">+</button>
   </div>`;
 }
 const DEMO_Q = store.modo === 'local' && location.search ? location.search : '';
@@ -1194,12 +1242,14 @@ const go = router(ROUTES, render);
 
 const common = {
   goto: (el) => (location.hash = el.dataset.h),
+  eaiAbrir: () => ia.abrir(),
+  eaiMais: () => ia.menuMais(maisGestor(current.pattern, current.params).map((x) => ({ ...x, icone: icon(x.icone) })), { aoEscolher: escolherMais }),
   busca: (el) => { buscas[current.pattern] = el.value; filtrarBusca(app, el.value); },
   step: stepHandler,
   qty: () => {},
   back: () => history.length > 1 ? history.back() : (location.hash = '#/painel'),
   print: () => window.print(),
-  logout: async () => { localStorage.removeItem(SESSION); telaLogin = 'entrar'; await store.sair(); go(); },
+  logout: async () => { ia.limpar(); localStorage.removeItem(SESSION); telaLogin = 'entrar'; await store.sair(); go(); },
   telaLogin: (el) => { telaLogin = el.dataset.v; go(); },
   entrar: async (f) => {
     const fd = new FormData(f); const btn = f.querySelector('button.lg'); btn.disabled = true;

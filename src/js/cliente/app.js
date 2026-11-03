@@ -6,6 +6,7 @@ import { money, money0, moneyK, int, percent, date, dateShort, relDays, today, a
 import { icon, router, delegate, modal, closeModal, confirmar, toast, kpi, badge, empty, thumb, stepper, stepHandler, fichaVinho, iniciais, qtdBadge, waLink, download, toCSV, asset, instalar, bannerInstalar, dispensarBanner, registerSW, verificarAtualizacao, versaoApp, moneyInput, parseMoney } from '../core/ui.js';
 import { chart, mountCharts, resetCharts, hbars, heatmap } from '../core/charts.js';
 import { novoWizard, renderWizard, wizardHandlers, statusBadge, ajustesHTML, acertosHTML } from '../core/fechamento-ui.js';
+import { criarIA, extrasParceiro } from '../core/ia.js';
 
 const app = document.getElementById('app');
 const S = () => store.get();
@@ -23,6 +24,26 @@ let current = {};
 let handlers = {};
 let wz = null;
 
+// ---------- Assistente (IA) ----------
+// O parceiro vê só o que é dele (na nuvem o banco já filtrou; na demonstração o aparelho tem tudo)
+const IA_SVG = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></svg>';
+const COL_IA = { produtos: ['Rótulos da Mil Terras', false], clientes: ['Meu cadastro', false], movs: ['Remessas e movimentações', false], vendas: ['Minhas vendas', false], fechamentos: ['Meus fechamentos', false], pedidos: ['Meus pedidos de reposição', true] };
+const ia = criarIA({
+  app: 'usuario',
+  colecoes: () => Object.fromEntries(Object.entries(COL_IA).map(([k, [nome, escrita]]) => [k, { nome, escrita: escrita && !espelhoOk() }])),
+  extras: () => extrasParceiro(S(), cid()),
+  visivel: () => { const s = S(), id = cid(); return { ...s, clientes: s.clientes.filter((c) => c.id === id), movs: s.movs.filter((m) => m.clienteId === id), vendas: s.vendas.filter((v) => v.clienteId === id),
+    fechamentos: s.fechamentos.filter((f) => f.clienteId === id), pedidos: (s.pedidos || []).filter((p) => p.clienteId === id), despesas: [] }; },
+  quem: () => C()?.nome || '', ref: () => cid(),
+  sugestoes: () => ({
+    '/inicio': ['Quais vinhos mais vendi este mês?', 'O que devo pedir de reposição?'],
+    '/estoque': ['Quais garrafas estão paradas há mais tempo?'],
+    '/relatorios': ['Qual garçom mais vendeu este mês?', 'Como foi este mês comparado com o anterior?'],
+    '/fechamento': ['Quanto vou pagar no próximo fechamento, mais ou menos?'],
+    '/pedido': ['Monte um pedido de reposição pelo meu ritmo de vendas'],
+  }[current.pattern] || ['Que vinho combina com costela?']),
+});
+
 // Selo de preço especial (promoção da Mil Terras para este parceiro)
 const promo = (s, c, pid) => { const x = D.promocao(s, c, pid); return x ? ` <span class="badge ok">preço especial${x.ate ? ' até ' + dateShort(x.ate) : ''}</span>` : ''; };
 
@@ -36,9 +57,10 @@ function shell(title, content, { back } = {}) {
   return `<div class="shell">
     <aside class="side"><div class="brand"><img src="${asset('assets/logo/logo_h_negativo.png')}" alt="Mil Terras"><div class="who">${esc(c.nome)}</div></div>
       ${SIDE.map(([h, ic, n]) => `<a class="nav-a ${on(h) ? 'on' : ''}" href="${h}">${icon(ic)}<span>${n}</span>${b(h)}</a>`).join('')}
+      <a class="nav-a" href="#" data-act="eaiAbrir">${icon('spark')}<span>Assistente</span></a>
       <div class="foot"><span class="sync">Conectado à Mil Terras</span><br><a href="#" data-act="logout" style="color:#C9B3AC">Sair</a></div></aside>
     <div>
-      <header class="topbar">${back ? `<button data-act="back" aria-label="Voltar">${icon('arrowL')}</button>` : `<img src="${asset('assets/logo/simbolo_negativo.png')}" alt="">`}<div class="t ellipsis">${title}</div><a style="color:#fff" target="_blank" rel="noopener" href="${waLink(S().meta.whatsapp, `Olá, Mil Terras! Aqui é do ${c.nome}.`)}" aria-label="Falar com a Mil Terras">${icon('whatsapp')}</a></header>
+      <header class="topbar">${back ? `<button data-act="back" aria-label="Voltar">${icon('arrowL')}</button>` : `<img src="${asset('assets/logo/simbolo_negativo.png')}" alt="">`}<div class="t ellipsis">${title}</div><a style="color:#fff" target="_blank" rel="noopener" href="${waLink(S().meta.whatsapp, `Olá, Mil Terras! Aqui é do ${c.nome}.`)}" aria-label="Falar com a Mil Terras">${icon('whatsapp')}</a><button class="eai-topo" data-act="eaiAbrir" aria-label="Assistente" title="Assistente" style="color:#fff">${IA_SVG}</button></header>
       <main class="main">${espelhoOk() ? `<div class="demo-banner">${icon('info')}<span class="grow">Você está vendo o app de <b>${esc(c.nome)}</b> como ele vê, em tempo real. <b>Somente leitura.</b></span><a href="#" data-act="fecharEspelho">Fechar</a></div>` : ''}${content}</main></div>
     <nav class="tabbar">${NAV.map(([h, ic, n]) => h === '#/vender' ? `<a href="${h}" class="fab"><span class="ic">${icon('plus')}</span></a>` : `<a href="${h}" class="${on(h) || (h === '#/mais' && ['#/carta', '#/ajustes', '#/estoque', '#/pedido'].some(on)) ? 'on' : ''}">${icon(ic)}<span>${n}</span>${b(h)}</a>`).join('')}</nav>
   </div>`;
@@ -357,13 +379,14 @@ const go = router(ROUTES, render);
 
 const common = {
   goto: (el) => (location.hash = el.dataset.h),
+  eaiAbrir: () => ia.abrir(),
   back: () => (history.length > 1 ? history.back() : (location.hash = '#/inicio')),
   print: () => window.print(),
   install: instalar,
   atualizarApp: () => verificarAtualizacao(true),
   semBanner: () => { dispensarBanner(); rerender(); },
   step: stepHandler,
-  logout: async () => { localStorage.removeItem(SESSION); await store.sair(); go(); },
+  logout: async () => { ia.limpar(); localStorage.removeItem(SESSION); await store.sair(); go(); },
   login: async (f) => {
     const fd = new FormData(f);
     if (store.modo === 'nuvem') {
