@@ -812,11 +812,41 @@ function vProduto({ id }) {
     </div>`, { back: true });
 }
 
+// Reduz a foto no próprio aparelho (máx. 480 px de altura) e devolve como data URL,
+// gravada junto com o rótulo: sincroniza com a nuvem e aparece no app do parceiro.
+function reduzirImagem(arq, maxH = 480, maxW = 320) {
+  return new Promise((res, rej) => {
+    const img = new Image();
+    const src = URL.createObjectURL(arq);
+    img.onerror = () => { URL.revokeObjectURL(src); rej(new Error('imagem')); };
+    img.onload = () => {
+      URL.revokeObjectURL(src);
+      const k = Math.min(1, maxH / img.height, maxW / img.width);
+      const c = document.createElement('canvas');
+      c.width = Math.max(1, Math.round(img.width * k)); c.height = Math.max(1, Math.round(img.height * k));
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      let url = c.toDataURL('image/webp', 0.82); // mantém fundo transparente
+      if (!url.startsWith('data:image/webp')) { // navegador sem WebP: PNG se couber, senão JPEG sobre branco
+        url = c.toDataURL('image/png');
+        if (url.length > 180000) { const b = document.createElement('canvas'); b.width = c.width; b.height = c.height; const g = b.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, b.width, b.height); g.drawImage(c, 0, 0); url = b.toDataURL('image/jpeg', 0.85); }
+      }
+      res(url);
+    };
+    img.src = src;
+  });
+}
+
 function modalProduto(id, onSalvo, onCancelar) {
   const s = S();
   const p = id ? D.produto(s, id) : { id: '', nome: '', tipo: 'Tinto', regiao: '', classificacao: '', uvas: '', teor: '', safra: new Date().getFullYear() - 2, preco: 0, custo: 0, precoCarta: 0, estoqueMin: 24, servir: '18–20 °C', descricao: '', harmonizacao: '', foto: 'assets/logo/simbolo.png', ativo: true };
   const f = (n, l, v, t = 'text') => `<label class="field"><span>${l}</span><input class="input" name="${n}" type="${t}" ${t === 'number' ? 'step="0.01"' : ''} value="${esc(v)}"></label>`;
   modal({ title: id ? 'Editar rótulo' : 'Novo rótulo', wide: true, body: `<form id="fprod" class="col">
+    <div class="row gap-l" style="align-items:center">
+      <button type="button" class="foto-pick" data-act="fotoEscolher" title="Trocar imagem do rótulo"><img id="fotoPrev" src="${asset(p.foto)}" alt=""><span>${icon('edit')}</span></button>
+      <div class="col" style="gap:6px"><b>Imagem do rótulo</b><span class="small muted">Toque na imagem para escolher uma foto da garrafa (de preferência com fundo transparente ou branco).</span>
+        <div class="row gap-s"><button type="button" class="btn ghost sm" data-act="fotoEscolher">Escolher imagem</button><button type="button" class="btn ghost sm" data-act="fotoRemover">Usar logo</button></div></div>
+      <input type="file" id="fotoArq" accept="image/*" hidden><input type="hidden" name="foto" value="${esc(p.foto || '')}">
+    </div>
     <div class="grid g2">${f('nome', 'Nome', p.nome)}<label class="field"><span>Tipo</span><select class="input" name="tipo">${['Tinto', 'Branco', 'Rosé', 'Espumante'].map((t) => `<option ${p.tipo === t ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
     ${f('regiao', 'Região', p.regiao)}${f('classificacao', 'Classificação (DOCG, DOC, IGP…)', p.classificacao)}${f('uvas', 'Uvas', p.uvas)}${f('safra', 'Safra', p.safra, 'number')}
     ${f('teor', 'Teor alcoólico', p.teor)}${f('servir', 'Servir a', p.servir)}
@@ -825,8 +855,18 @@ function modalProduto(id, onSalvo, onCancelar) {
     <label class="field"><span>Harmonização</span><input class="input" name="harmonizacao" value="${esc(p.harmonizacao)}"></label>
     <label class="row small"><input type="checkbox" name="ativo" ${p.ativo ? 'checked' : ''}> Ativo no catálogo</label></form>`,
     foot: `<button class="btn ghost" data-act="close">Cancelar</button><button class="btn" data-act="ok">Salvar</button>`,
-    handlers: { close: () => { closeModal(); onCancelar?.(); }, ok: () => {
+    onMount: (el) => el.querySelector('#fotoArq').addEventListener('change', async (e) => {
+      const arq = e.target.files[0]; e.target.value = '';
+      if (!arq) return;
+      try { const url = await reduzirImagem(arq); el.querySelector('[name=foto]').value = url; el.querySelector('#fotoPrev').src = url; }
+      catch { toast('Não foi possível ler esta imagem'); }
+    }),
+    handlers: { close: () => { closeModal(); onCancelar?.(); },
+      fotoEscolher: () => document.getElementById('fotoArq').click(),
+      fotoRemover: () => { const pad = 'assets/logo/simbolo.png'; document.querySelector('#fprod [name=foto]').value = pad; document.getElementById('fotoPrev').src = asset(pad); },
+      ok: () => {
       const fd = Object.fromEntries(new FormData(document.getElementById('fprod')));
+      if (!fd.foto) delete fd.foto;
       if (!fd.nome) return toast('Informe o nome');
       store.commit((st) => {
         const alvo = id ? D.produto(st, id) : (st.produtos.push({ ...p, id: fd.nome.toLowerCase().normalize('NFD').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') + '-' + uid().slice(-3) }), st.produtos[st.produtos.length - 1]);
@@ -899,7 +939,7 @@ const PAPEL = { dono: 'Dono', gestor: 'Gestor', parceiro: 'Parceiro' };
 const CAMPOS = { nome: 'nome', codigo: 'código', pin: 'PIN', telefone: 'telefone', email: 'e-mail', contato: 'contato', cidade: 'cidade', cnpj: 'CNPJ', cicloDias: 'ciclo de acerto', prazoDias: 'prazo',
   formasPagamento: 'formas de pagamento', formaPadrao: 'forma padrão', garcons: 'equipe', precosCarta: 'preços de carta', ativo: 'ativo', preco: 'preço', precoCarta: 'preço de carta', estoqueMin: 'estoque mínimo',
   descricao: 'descrição', valor: 'valor', categoria: 'categoria', data: 'data', qtd: 'quantidade', obs: 'observação', status: 'status', itens: 'itens', vencimento: 'vencimento', formaPagamento: 'forma de pagamento',
-  empresa: 'nome da empresa', whatsapp: 'WhatsApp', instagram: 'Instagram', safra: 'safra', regiao: 'região', tipo: 'tipo' };
+  empresa: 'nome da empresa', whatsapp: 'WhatsApp', instagram: 'Instagram', safra: 'safra', regiao: 'região', tipo: 'tipo', foto: 'imagem' };
 const AUTOMATICOS = ['recomendados', 'filaPedido', 'ts', 'updatedAt']; // gravados pelo próprio app, não por uma ação da pessoa
 const camposMudados = (x) => Object.keys(x.depois || {}).filter((k) => !AUTOMATICOS.includes(k) && JSON.stringify(x.antes?.[k] ?? null) !== JSON.stringify(x.depois[k] ?? null));
 const listaCampos = (ks) => ks.map((k) => CAMPOS[k] || k).join(', ');
