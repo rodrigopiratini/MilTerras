@@ -196,12 +196,13 @@ export function criarApp(def) {
       <a href="#" class="small center" data-act="logout">Usar outra conta</a>`, 'nada');
     const novo = telaLogin === 'novo' && !EXCLUSIVO;
     return caixa(SEGMENTO.gestao.curto, `
-      ${EXCLUSIVO ? '' : `<div class="seg" style="align-self:center"><button type="button" class="${novo ? '' : 'on'}" data-act="telaLogin" data-v="entrar">Entrar</button><button type="button" class="${novo ? 'on' : ''}" data-act="telaLogin" data-v="novo">Criar conta</button></div>`}
+      ${EXCLUSIVO || UNICA ? '' : `<div class="seg" style="align-self:center"><button type="button" class="${novo ? '' : 'on'}" data-act="telaLogin" data-v="entrar">Entrar</button><button type="button" class="${novo ? 'on' : ''}" data-act="telaLogin" data-v="novo">Criar conta</button></div>`}
       <label class="field"><span>E-mail</span><input class="input" name="email" type="email" autocomplete="username" value="${esc(novo ? '' : lembrado('ultimo-email'))}" required></label>
       <label class="field"><span>Senha${novo ? ' (mínimo 8 caracteres)' : ''}</span><input class="input" name="senha" type="password" minlength="${novo ? 8 : 1}" autocomplete="${novo ? 'new-password' : 'current-password'}" required></label>
       <button class="btn lg block">${novo ? 'Criar conta' : 'Entrar'}</button>
-      ${novo ? `<div class="tiny muted center">Depois você cria sua empresa (${SEGMENTO.diasTeste || 30} dias grátis) ou usa um convite.</div>` : '<a href="#" class="small center" data-act="esqueci">Esqueci minha senha</a>'}
-      ${EXCLUSIVO ? '' : '<a class="tiny muted center" href="?demo=1">Ver demonstração com dados fictícios</a>'}`, novo ? 'cadastrar' : 'entrar', true);
+      ${novo ? '' : '<a href="#" class="small center" data-act="esqueci">Esqueci minha senha</a>'}
+      ${EXCLUSIVO ? '' : UNICA ? `<div class="tiny muted center">${novo ? 'Já tem conta? <a href="#" data-act="telaLogin" data-v="entrar">Entrar</a>' : 'Empresa nova? <a href="#" data-act="telaLogin" data-v="novo">Criar conta</a> · <a href="?demo=1">ver demonstração</a>'}</div>`
+        : '<a class="tiny muted center" href="?demo=1">Ver demonstração com dados fictícios</a>'}`, novo ? 'cadastrar' : 'entrar', true);
   }
   function vLoginUsuario() {
     return caixa(U.curto, `
