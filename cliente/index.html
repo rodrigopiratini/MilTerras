@@ -1,11 +1,28 @@
 <!doctype html>
 <html lang="pt-BR">
 <head>
+<!-- endereço antigo (apps instalados antes): abre o app aqui mesmo; redirecionar saía do escopo do app instalado e o Chrome mostrava a barra do navegador -->
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Mil Terras</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Mil Terras Parceiro</title>
+<meta name="theme-color" content="#4A1019">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Mil Terras">
+<meta name="description" content="Para restaurantes, bares e lojas: registrar vendas, pedir reposição e fazer o fechamento.">
 <link rel="manifest" href="manifest.webmanifest">
-<script>location.replace('../usuario/' + location.search + location.hash);</script>
+<link rel="icon" href="../assets/icons/app-192.png?v=1fd7e320">
+<link rel="apple-touch-icon" href="../assets/icons/app-180.png?v=1fd7e320">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Poppins:wght@500&family=Lora:ital@1&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../src/css/base.css">
+<link rel="stylesheet" href="../src/css/segmento.css">
 </head>
-<body><p style="font-family:system-ui;text-align:center;margin-top:40px">O app mudou de endereço. <a href="../usuario/">Abrir</a></p></body>
+<body>
+<div id="app"></div>
+<noscript>Ative o JavaScript para usar o app.</noscript>
+<script>if (!/[?&]entrar=/.test(location.search)) history.replaceState(null, '', location.pathname + (location.search ? location.search + '&' : '?') + 'entrar=usuario' + location.hash);</script>
+<script src="../src/vendor/supabase.js"></script>
+<script type="module" src="../src/js/core/entrada.js"></script>
+</body>
 </html>
