@@ -249,7 +249,7 @@ a.li, .li.click { color: inherit; cursor: pointer; }
 .heat td { text-align: center; border-radius: 4px; min-width: 30px; height: 30px; font-variant-numeric: tabular-nums; font-weight: 600; }
 
 /* Login */
-.login { min-height: 100vh; display: grid; place-items: center; padding: 24px; background: radial-gradient(120% 80% at 50% 0%, var(--primaria), var(--primaria-escura) 70%); }
+.login { min-height: 100vh; display: grid; place-items: center; align-content: center; gap: 14px; padding: 24px; background: radial-gradient(120% 80% at 50% 0%, var(--primaria), var(--primaria-escura) 70%); }
 .login .box { width: min(400px, 100%); background: var(--fundo); border-radius: 22px; padding: 28px 24px; box-shadow: 0 30px 80px rgba(0, 0, 0, .35); }
 .login .logo { display: block; width: 210px; margin: 0 auto 6px; }
 .pin { display: flex; gap: 10px; justify-content: center; }

@@ -215,18 +215,25 @@ export function instalar() {
       ${ios ? `<div><b>iPhone (Safari):</b> toque em <b>Compartilhar</b> <span class="muted">(quadrado com seta)</span> › <b>Adicionar à Tela de Início</b> › Adicionar.</div>`
         : `<div><b>Android (Chrome):</b> menu <b>⋮</b> › <b>Instalar app</b> (ou <b>Adicionar à tela inicial</b> › Instalar).</div>`}
       <div class="row gap-s"><button class="btn ghost sm" data-act="copiarLink">Copiar link</button><span class="tiny muted">Cole no Chrome/Safari se preferir.</span></div>
+      ${ios ? '' : `<div class="muted"><b>O Chrome diz “Esse app já está instalado”, mas o ícone sumiu?</b> Tirar o ícone da tela inicial não desinstala. Abra <b>Configurações › Aplicativos › ${esc(SEGMENTO.nome)} › Desinstalar</b> e instale de novo por aqui.</div>`}
       <div class="muted">Instalado, o app abre em tela cheia, com ícone próprio, e funciona mesmo com internet instável.</div>
     </div>`, handlers: { copiarLink: () => { navigator.clipboard?.writeText(location.origin + location.pathname); toast('Link copiado'); } } });
 }
 export const instalado = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
 export const ehCelular = () => matchMedia('(max-width: 900px)').matches && 'ontouchstart' in window;
 // Faixa “Instale o app” (celular, fora do app instalado, até a pessoa dispensar)
+// Dispensada, a faixa volta depois de 7 dias (aberto pelo link do WhatsApp, por exemplo, a pessoa ainda não instalou).
 export function bannerInstalar() {
-  let off = false; try { off = localStorage.getItem(SEGMENTO.id + '-sem-banner-instalar') === '1'; } catch {}
+  let off = false; try { off = Date.now() < Number(localStorage.getItem(SEGMENTO.id + '-sem-banner-instalar-ate') || 0); } catch {}
   if (off || instalado() || !ehCelular()) return '';
-  return `<div class="demo-banner">${icon('download')}<span class="grow">Instale o app na tela inicial para abrir mais rápido.</span><a href="#" data-act="install"><b>Como instalar</b></a><a href="#" data-act="semBanner" aria-label="Dispensar">${icon('x')}</a></div>`;
+  return `<div class="demo-banner">${icon('download')}<span class="grow">Instale o app na tela inicial para abrir mais rápido.</span><a href="#" data-act="install"><b>Instalar</b></a><a href="#" data-act="semBanner" aria-label="Dispensar">${icon('x')}</a></div>`;
 }
-export function dispensarBanner() { try { localStorage.setItem(SEGMENTO.id + '-sem-banner-instalar', '1'); } catch {} }
+export function dispensarBanner() { try { localStorage.setItem(SEGMENTO.id + '-sem-banner-instalar-ate', String(Date.now() + 7 * 86400000)); } catch {} }
+// Na tela de entrar (quem abriu pelo link ainda nem entrou): botão de instalar, sem dispensar
+export function cardInstalar() {
+  if (instalado() || !ehCelular()) return '';
+  return `<button type="button" class="btn ghost block" data-act="install" style="width:min(400px, 100%);color:#fff;border-color:rgba(255,255,255,.45);background:transparent">${icon('download')} Instalar o app no celular</button>`;
+}
 
 export function registerSW() {
   if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register(ROOT + 'sw.js').catch(() => {});

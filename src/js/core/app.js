@@ -10,7 +10,7 @@
 import * as store from './store.js';
 import { SEGMENTO } from '../segmento.js';
 import { esc, date, today, money0, int } from './fmt.js';
-import { ROOT, icon, router, delegate, modal, closeModal, confirmar, toast, empty, waLink, download, asset, instalar, bannerInstalar, dispensarBanner, registerSW, verificarAtualizacao, versaoApp, filtrarBusca, buscaInput, iniciais, badge, kpi, moneyInput, parseMoney, stepHandler } from './ui.js';
+import { ROOT, icon, router, delegate, modal, closeModal, confirmar, toast, empty, waLink, download, asset, instalar, bannerInstalar, cardInstalar, dispensarBanner, registerSW, verificarAtualizacao, versaoApp, filtrarBusca, buscaInput, iniciais, badge, kpi, moneyInput, parseMoney, stepHandler } from './ui.js';
 import { mountCharts, resetCharts } from './charts.js';
 import { criarAssistente } from './assistente.js';
 import { CONFIG } from '../config.js';
@@ -178,7 +178,7 @@ export function criarApp(def) {
   // na entrada única, o topo do login troca entre e-mail e senha (Gestão) e código + PIN (usuário)
   const trocaEntrada = () => UNICA && !store.espelho ? `<div class="seg" style="align-self:center"><button type="button" class="${gestao ? 'on' : ''}" ${gestao ? '' : 'data-act="trocarEntrada" data-v="gestao"'}>${esc(SEGMENTO.gestao.curto)}</button><button type="button" class="${gestao ? '' : 'on'}" ${gestao ? 'data-act="trocarEntrada" data-v="usuario"' : ''}>${esc(U.curto)}</button></div>` : '';
   const caixa = (sub, corpo, acao, troca = false) => `<div class="login"><form class="box col" data-onsubmit="${acao}" style="gap:14px">
-    ${SEGMENTO.logo ? `<img class="logo" src="${asset(SEGMENTO.logo)}" alt="" style="background:var(--primaria-escura);padding:12px;border-radius:14px">` : `<div class="ea-cab">${tile}${nomeMarca}<small>${esc(UNICA ? '' : sub)}</small></div>`}${troca ? trocaEntrada() : ''}${corpo}</form></div>`;
+    ${SEGMENTO.logo ? `<img class="logo" src="${asset(SEGMENTO.logo)}" alt="" style="background:var(--primaria-escura);padding:12px;border-radius:14px">` : `<div class="ea-cab">${tile}${nomeMarca}<small>${esc(UNICA ? '' : sub)}</small></div>`}${troca ? trocaEntrada() : ''}${corpo}</form>${cardInstalar()}</div>`;
 
   function vLoginGestao() {
     if (store.modo === 'local') return caixa(`${SEGMENTO.gestao.curto} · demonstração`, `
