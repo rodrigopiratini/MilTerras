@@ -29,6 +29,9 @@ function escolher() {
   return /\/usuario\/?$/.test(location.pathname) ? 'usuario' : 'gestao';
 }
 
+// O Chrome avisa cedo que o app pode ser instalado (beforeinstallprompt). O app de verdade carrega um passo
+// depois (import abaixo), então guardamos o aviso aqui para o botão "Instalar" usar (src/js/core/ui.js).
+window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); window.EA_INSTALAR = e; });
 window.EA_ENTRADA = { unica: true, chave: ESCOLHA };
 const app = escolher();
 document.documentElement.dataset.app = app;

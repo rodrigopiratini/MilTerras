@@ -198,7 +198,7 @@ export function toCSV(rows) {
 }
 
 // Instalação como app (Android/desktop) + dica para iPhone
-let deferredPrompt = null;
+let deferredPrompt = window.EA_INSTALAR || null;   // o aviso pode ter chegado antes (src/js/core/entrada.js)
 window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); deferredPrompt = e; document.querySelectorAll('[data-act="install"]').forEach((b) => b.classList.remove('hide')); });
 export function instalar() {
   if (deferredPrompt) { deferredPrompt.prompt(); deferredPrompt = null; return; }
