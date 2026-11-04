@@ -261,7 +261,8 @@ export function criarNuvem(app, hooks) {
       async cadastrar() {
         const { data: l } = await sb.auth.mfa.listFactors();
         for (const f of l?.all || []) if (f.status !== 'verified') await sb.auth.mfa.unenroll({ factorId: f.id });
-        const { data, error } = await sb.auth.mfa.enroll({ factorType: 'totp', friendlyName: `${SEGMENTO.nome} ${new Date().toISOString().slice(0, 10)}` });
+        // um nome só no autenticador para todos os apps da fábrica (mesmo banco, mesma conta de verificação)
+        const { data, error } = await sb.auth.mfa.enroll({ factorType: 'totp', issuer: 'EasyAPP Fábrica', friendlyName: `EasyAPP Fábrica ${new Date().toISOString().slice(0, 10)}` });
         if (error) throw new Error(error.message);
         return { id: data.id, qr: data.totp.qr_code, segredo: data.totp.secret };
       },

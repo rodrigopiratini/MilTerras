@@ -378,7 +378,7 @@ export function criarApp(def) {
   async function garantirMfa() {
     if ((await store.mfa.nivel()) === 'aal2') return true;
     const f = await store.mfa.fator();
-    if (f) return pedirCodigo(f.id, '<p class="small">Digite o código que aparece no seu app autenticador.</p>');
+    if (f) return pedirCodigo(f.id, '<p class="small">Digite o código da conta <b>EasyAPP Fábrica</b> no seu app autenticador (a mesma para Frota, Mil Terras e Golden).</p>');
     const n = await store.mfa.cadastrar();
     return pedirCodigo(n.id, `<p class="small">Para abrir empresas de clientes é preciso a verificação em duas etapas (configura uma vez; vale para todos os apps da fábrica). Leia o QR code com um app autenticador (Google Authenticator, Microsoft Authenticator, 1Password…) e digite o código.</p>
       <div class="center"><img src="${n.qr}" alt="QR code" width="190" height="190" style="background:#fff;padding:8px;border-radius:12px"></div>
