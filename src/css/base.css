@@ -354,6 +354,7 @@ a.li, .li.click { color: inherit; cursor: pointer; }
 .ea-abertura { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px; background: radial-gradient(120% 80% at 50% 0%, var(--primaria), var(--primaria-escura) 70%); }
 .ea-abertura .ea-tile { width: 104px; height: 104px; border-radius: 26px; animation: eaPulsa 1.8s ease-in-out .9s infinite; }
 .ea-abertura .ea-tile .ea-barras { height: 58px; gap: 8px; } .ea-abertura .ea-tile .ea-barras i { width: 16px; border-radius: 5px; }
+.ea-abertura .ea-logo { width: min(240px, 66vw); height: auto; animation: eaSurge .5s ease both, eaPulsa 1.8s ease-in-out .9s infinite; }
 .ea-abertura .ea-nome { color: #fff; font-size: 22px; animation: eaSurge .5s ease .45s both; }
 @keyframes eaPulsa { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.05); } }
 .side .brand .ea-marca { padding: 2px 0; }

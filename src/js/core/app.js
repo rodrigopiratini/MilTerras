@@ -118,6 +118,8 @@ export function criarApp(def) {
   const barras = '<span class="ea-barras" aria-hidden="true"><i></i><i></i><i></i></span>';
   const nomeMarca = `<span class="ea-nome">EasyAPP<b>${esc(produto)}</b></span>`;
   const tile = `<span class="ea-tile" aria-hidden="true">${barras}</span>`;
+  // abertura: app com logo próprio (Mil Terras, Golden…) mostra o logo; os outros, o ícone e o nome EasyAPP
+  const marcaAbertura = () => (SEGMENTO.logo ? `<img class="ea-logo" src="${asset(SEGMENTO.logo)}" alt="${esc(SEGMENTO.nome)}">` : `${tile}${nomeMarca}`);
   const marca = () => SEGMENTO.logo ? `<img src="${asset(SEGMENTO.logo)}" alt="${esc(SEGMENTO.nome)}">` : `<div class="ea-marca">${barras}${nomeMarca}</div>`;
 
   function avisoSuporte() {
@@ -465,7 +467,7 @@ export function criarApp(def) {
   async function entrarTestes() {
     if (testando) return;
     testando = true;
-    root.innerHTML = `<div class="ea-abertura">${tile}${nomeMarca}</div>`;
+    root.innerHTML = `<div class="ea-abertura">${marcaAbertura()}</div>`;
     try {
       await store.rpc('plataforma_empresa_testes');
       if (!(await store.reiniciar())) throw new Error('empresa de testes indisponível');
@@ -569,7 +571,7 @@ export function criarApp(def) {
 
   function iniciar() {
     registerSW();
-    root.innerHTML = SEGMENTO.logo ? `<div class="login"><div class="marca" style="color:#fff">${esc(SEGMENTO.nome)}</div></div>` : `<div class="ea-abertura">${tile}${nomeMarca}</div>`;
+    root.innerHTML = `<div class="ea-abertura">${marcaAbertura()}</div>`;
     const erroLink = new URLSearchParams(location.hash.replace(/^#\/?/, '')).get('error_code');
     if (erroLink) history.replaceState(null, '', location.pathname + location.search);
     // Se a abertura travar (internet ruim, sessão velha guardada no aparelho, erro ao carregar), a pessoa não fica
@@ -578,7 +580,7 @@ export function criarApp(def) {
     const travou = (e) => {
       if (aberto) return; aberto = true;
       if (e) console.warn('abertura', e);
-      root.innerHTML = `<div class="ea-abertura">${tile}${nomeMarca}<div class="col" style="align-items:center;gap:12px;max-width:320px;text-align:center;color:#fff">
+      root.innerHTML = `<div class="ea-abertura">${marcaAbertura()}<div class="col" style="align-items:center;gap:12px;max-width:320px;text-align:center;color:#fff">
         <div class="small" style="opacity:.85">${e ? 'Não deu para abrir o app agora.' : 'Está demorando para abrir.'} Confira a internet e tente de novo.</div>
         <button class="btn" data-act="abrirDeNovo">Tentar de novo</button>
         <button class="btn ghost" style="color:#fff;border-color:rgba(255,255,255,.4)" data-act="entrarDeNovo">Entrar de novo</button></div></div>`;
