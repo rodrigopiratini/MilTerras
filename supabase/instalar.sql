@@ -143,17 +143,17 @@ language sql stable security definer set search_path = milterras, public, extens
 $$ select coalesce((auth.jwt()->>'is_anonymous')::boolean, false) = false
       and exists (select 1 from milterras.plataforma_admins where lower(email) = lower(auth.jwt()->>'email')) $$;
 
--- Visita de suporte em vigor: só para o desenvolvedor, dentro do prazo e com a verificação em duas etapas
--- feita nesta sessão (aal2). Sem isso as funções abaixo ignoram a visita.
+-- Visita de suporte em vigor: só para o desenvolvedor e dentro do prazo. Sem isso as funções abaixo ignoram a visita.
+-- (A verificação em duas etapas fica no painel EasyAPP Gestão, que é por onde o suporte entra.)
 create or replace function milterras.visita_empresa() returns uuid
 language sql stable security definer set search_path = milterras, public, extensions as
 $$ select v.empresa_id from milterras.suporte_visitas v
-    where v.user_id = auth.uid() and v.ate > now() and coalesce(auth.jwt()->>'aal', '') = 'aal2' and milterras.eh_admin() $$;
+    where v.user_id = auth.uid() and v.ate > now() and milterras.eh_admin() $$;
 
 create or replace function milterras.visita_modo(p_empresa uuid) returns text
 language sql stable security definer set search_path = milterras, public, extensions as
 $$ select v.modo from milterras.suporte_visitas v
-    where v.user_id = auth.uid() and v.empresa_id = p_empresa and v.ate > now() and coalesce(auth.jwt()->>'aal', '') = 'aal2' and milterras.eh_admin() $$;
+    where v.user_id = auth.uid() and v.empresa_id = p_empresa and v.ate > now() and milterras.eh_admin() $$;
 
 -- Visita "só ver": o banco recusa qualquer gravação nessa empresa
 create or replace function milterras.so_leitura(p_empresa uuid) returns boolean
@@ -293,13 +293,12 @@ language sql stable security definer set search_path = milterras, public, extens
 $$;
 
 -- Desenvolvedor: abre uma empresa no próprio app (só ver ou ver e corrigir) por 2 horas.
--- Exige a verificação em duas etapas nesta sessão. Fica no registro de atividades da empresa.
+-- Fica no registro de atividades da empresa.
 create or replace function milterras.suporte_abrir(p_empresa uuid, p_modo text) returns json
 language plpgsql security definer set search_path = milterras, public, extensions as $$
 declare v_modo text := case when p_modo = 'edicao' then 'edicao' else 'leitura' end;
 begin
   if not milterras.eh_admin() then raise exception 'Sem permissão'; end if;
-  if coalesce(auth.jwt()->>'aal', '') <> 'aal2' then raise exception 'MFA: confirme o código de verificação em duas etapas'; end if;
   if not exists (select 1 from milterras.empresas where id = p_empresa) then raise exception 'Empresa não encontrada'; end if;
   insert into milterras.suporte_visitas (user_id, empresa_id, modo, desde, ate) values (auth.uid(), p_empresa, v_modo, now(), now() + interval '2 hours')
     on conflict (user_id) do update set empresa_id = excluded.empresa_id, modo = excluded.modo, desde = excluded.desde, ate = excluded.ate;
@@ -307,6 +306,21 @@ begin
   values (p_empresa, auth.uid(), 'suporte', 'Suporte (' || coalesce(auth.jwt()->>'email', '') || ')', 'acesso', jsonb_build_object('modo', v_modo));
   return milterras.meu_perfil();
 end $$;
+
+-- O mesmo, aberto pelo painel EasyAPP Gestão (função gestao-fabrica, chave de serviço): "entrar como" sem pedir login no app.
+create or replace function milterras.suporte_abrir_painel(p_user uuid, p_empresa uuid, p_modo text, p_quem text) returns void
+language plpgsql security definer set search_path = milterras, public, extensions as $$
+declare v_modo text := case when p_modo = 'edicao' then 'edicao' else 'leitura' end;
+begin
+  if not exists (select 1 from milterras.plataforma_admins a join auth.users u on lower(u.email) = lower(a.email) where u.id = p_user) then raise exception 'Sem permissão'; end if;
+  if not exists (select 1 from milterras.empresas where id = p_empresa) then raise exception 'Empresa não encontrada'; end if;
+  insert into milterras.suporte_visitas (user_id, empresa_id, modo, desde, ate) values (p_user, p_empresa, v_modo, now(), now() + interval '2 hours')
+    on conflict (user_id) do update set empresa_id = excluded.empresa_id, modo = excluded.modo, desde = excluded.desde, ate = excluded.ate;
+  insert into milterras.atividade (empresa_id, user_id, papel, quem, acao, depois)
+  values (p_empresa, p_user, 'suporte', 'Suporte (' || coalesce(p_quem, '') || ')', 'acesso', jsonb_build_object('modo', v_modo, 'origem', 'painel'));
+end $$;
+revoke all on function milterras.suporte_abrir_painel(uuid, uuid, text, text) from public, anon, authenticated;
+grant execute on function milterras.suporte_abrir_painel(uuid, uuid, text, text) to service_role;
 
 create or replace function milterras.suporte_sair() returns void
 language sql security definer set search_path = milterras, public, extensions as

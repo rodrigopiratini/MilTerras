@@ -31,6 +31,12 @@ function escolher() {
 
 // O Chrome avisa cedo que o app pode ser instalado (beforeinstallprompt). O app de verdade carrega um passo
 // depois (import abaixo), então guardamos o aviso aqui para o botão "Instalar" usar (src/js/core/ui.js).
+// "entrar como" do painel EasyAPP Gestão: a sessão vem no fim do endereço (#sessao=…); o app entra com ela
+// (src/js/core/cloud.js) e o endereço é limpo na hora, para a sessão não ficar no histórico.
+try {
+  const m = location.hash.match(/^#sessao=([^&]+)/);
+  if (m) { window.EA_SESSAO = JSON.parse(atob(decodeURIComponent(m[1]))); history.replaceState(null, '', location.pathname + location.search); }
+} catch { /* endereço inválido: segue para o login */ }
 window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); window.EA_INSTALAR = e; });
 window.EA_ENTRADA = { unica: true, chave: ESCOLHA };
 const app = escolher();

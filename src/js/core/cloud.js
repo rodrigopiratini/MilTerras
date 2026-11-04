@@ -192,6 +192,9 @@ export function criarNuvem(app, hooks) {
     registrarMudancas,
     get suporte() { return suporte(); },
     async iniciar() {
+      // sessão trazida pelo painel ("entrar como"): substitui a que estiver no aparelho
+      const pedida = app === 'gestao' && window.EA_SESSAO;
+      if (pedida) { window.EA_SESSAO = null; await sb.auth.setSession({ access_token: pedida.access_token, refresh_token: pedida.refresh_token }).catch((e) => console.warn('sessão do painel', e)); }
       const { data } = await sb.auth.getSession();
       if (!data.session) return false;
       try { return await iniciarSessao(); } catch (e) { console.warn(e); hooks.onErro?.('Sem conexão com o servidor. Tente novamente.'); return false; }

@@ -357,38 +357,10 @@ export function criarApp(def) {
       foot: `<button class="btn ghost" data-act="v">Só ver</button><button class="btn" data-act="c">Ver e corrigir</button>`,
       handlers: { v: () => { closeModal(); abrirEmpresa(id, 'leitura'); }, c: () => { closeModal(); abrirEmpresa(id, 'edicao'); } } });
   }
-  // Verificação em duas etapas: o banco só abre empresas de clientes com ela confirmada nesta sessão
-  function pedirCodigo(factorId, texto) {
-    return new Promise((res) => {
-      let feito = false;
-      modal({ title: 'Verificação em duas etapas', body: `<form id="fmfa" class="col" data-onsubmit="ok">${texto}
-        <label class="field"><span>Código de 6 dígitos</span><input class="input" name="codigo" inputmode="numeric" autocomplete="one-time-code" maxlength="8" style="font-size:22px;letter-spacing:.3em;text-align:center" required></label></form>`,
-        foot: '<button class="btn ghost" data-act="close">Cancelar</button><button class="btn" data-act="ok">Confirmar</button>',
-        onMount: (m) => m.querySelector('[name=codigo]').focus(),
-        handlers: { ok: async () => {
-          const c = document.querySelector('#fmfa [name=codigo]').value;
-          const b = document.querySelector('.overlay [data-act=ok]');
-          if (b) b.disabled = true;
-          try { await store.mfa.confirmar(factorId, c); feito = true; closeModal(); res(true); } catch (err) { toast(err.message); if (b) b.disabled = false; }
-        } } });
-      const fechou = new MutationObserver(() => { if (!document.getElementById('fmfa')) { fechou.disconnect(); if (!feito) res(false); } });
-      fechou.observe(document.body, { childList: true });
-    });
-  }
-  async function garantirMfa() {
-    if ((await store.mfa.nivel()) === 'aal2') return true;
-    const f = await store.mfa.fator();
-    if (f) return pedirCodigo(f.id, '<p class="small">Digite o código da conta <b>EasyAPP Fábrica</b> no seu app autenticador (a mesma para Frota, Mil Terras e Golden).</p>');
-    const n = await store.mfa.cadastrar();
-    return pedirCodigo(n.id, `<p class="small">Para abrir empresas de clientes é preciso a verificação em duas etapas (configura uma vez; vale para todos os apps da fábrica). Leia o QR code com um app autenticador (Google Authenticator, Microsoft Authenticator, 1Password…) e digite o código.</p>
-      <div class="center"><img src="${n.qr}" alt="QR code" width="190" height="190" style="background:#fff;padding:8px;border-radius:12px"></div>
-      <div class="tiny muted center">Sem câmera? Digite a chave no app: <code style="user-select:all;word-break:break-all">${esc(n.segredo)}</code></div>`);
-  }
   async function abrirEmpresa(id, modo, { semIr = false } = {}) {
     const e = plat.dados?.find((x) => x.id === id);
     if (modo === 'edicao' && !(await confirmar(`Abrir ${esc(e?.nome || 'a empresa')} para ver e corrigir? O que você mudar fica na conta do cliente.`, { ok: 'Abrir' }))) return;
     try {
-      if (!(await garantirMfa())) return;
       const ok = await store.abrirEmpresa(id, modo);
       if (!ok) throw new Error('não consegui abrir a empresa');
       ia?.limpar();
