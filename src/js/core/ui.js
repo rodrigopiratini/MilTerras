@@ -205,8 +205,34 @@ export function toCSV(rows) {
 // Instalação como app (Android/desktop) + dica para iPhone
 let deferredPrompt = window.EA_INSTALAR || null;   // o aviso pode ter chegado antes (src/js/core/entrada.js)
 window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); deferredPrompt = e; document.querySelectorAll('[data-act="install"]').forEach((b) => b.classList.remove('hide')); });
+// Android: o link tocado no WhatsApp (e em outros apps) abre numa janela do Chrome "de dentro" do app, que não deixa
+// instalar (e às vezes diz "já está instalado" sem estar). Sem o aviso de instalação, o botão leva a página para o
+// Chrome de verdade (intent://), com ?instalar=1: lá o app já mostra "Instalar agora".
+const android = /android/i.test(navigator.userAgent);
+const VEIO_INSTALAR = new URLSearchParams(location.search).has('instalar');
+function abrirNoChrome() {
+  const u = new URL(location.href); u.searchParams.set('instalar', '1');
+  location.href = `intent://${u.host}${u.pathname}${u.search}${u.hash}#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=${encodeURIComponent(u.href)};end`;
+}
 export function instalar() {
-  if (deferredPrompt) { deferredPrompt.prompt(); deferredPrompt = null; return; }
+  if (deferredPrompt) { deferredPrompt.prompt(); deferredPrompt.userChoice?.then((r) => { if (r?.outcome === 'accepted') toast('Instalando… o ícone aparece na tela inicial'); }); deferredPrompt = null; return; }
+  if (android && !VEIO_INSTALAR && !instalado()) return abrirNoChrome();
+  instrucoes();
+}
+// chegou pelo botão Instalar (já no Chrome): oferece "Instalar agora" assim que o Chrome permitir (até 5 s)
+if (VEIO_INSTALAR) {
+  const u = new URL(location.href); u.searchParams.delete('instalar'); history.replaceState(null, '', u.pathname + u.search + u.hash);
+  const ini = Date.now();
+  const tentar = () => {
+    if (instalado()) return;
+    if (deferredPrompt) return modal({ title: `Instalar o ${esc(SEGMENTO.nome)}`, body: '<p class="small">Toque abaixo para colocar o app na tela inicial do celular.</p>',
+      foot: '<button class="btn block" data-act="ok">Instalar agora</button>', handlers: { ok: () => { closeModal(); instalar(); } } });
+    if (Date.now() - ini < 5000) return setTimeout(tentar, 400);
+    instrucoes();
+  };
+  setTimeout(tentar, 1200);
+}
+function instrucoes() {
   const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
   modal({ title: 'Instalar no celular', body: `
     <div class="col small">
