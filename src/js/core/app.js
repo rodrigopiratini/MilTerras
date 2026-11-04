@@ -14,6 +14,7 @@ import { icon, router, delegate, modal, closeModal, confirmar, toast, empty, waL
 import { mountCharts, resetCharts } from './charts.js';
 import { criarAssistente } from './assistente.js';
 import { CONFIG } from '../config.js';
+import { seed } from '../seed.js';
 
 // Segmento sem app de campo (só Gestão): SEGMENTO.usuario = null
 const TEM_USUARIO = !!SEGMENTO.usuario;
@@ -21,6 +22,12 @@ const U = SEGMENTO.usuario || { papel: 'Usuário', papelPlural: 'Usuários', cur
 // Níveis: Desenvolvedor (quem cuida da fábrica: plataforma_admins; abre empresas pela Plataforma › Ver / Corrigir),
 // Administrador (o dono da empresa; papel 'dono' no banco), Gestor (delegado pelo Administrador; papel 'gestor')
 // e Usuário (o pessoal de ponta, no app de campo com código + PIN: motorista, parceiro…; papel 'usuario')
+// App exclusivo (de um cliente só, com a marca dele): sem cadastro livre, sem período de teste e sem planos
+const EXCLUSIVO = !!SEGMENTO.exclusivo;
+// Entrada única (src/js/core/entrada.js): o mesmo endereço abre a Gestão ou o app do usuário, conforme o login
+const UNICA = !!window.EA_ENTRADA?.unica && TEM_USUARIO;
+const lembrar = (k, v) => { try { v == null ? localStorage.removeItem(`${SEGMENTO.id}:${k}`) : localStorage.setItem(`${SEGMENTO.id}:${k}`, v); } catch {} };
+const lembrado = (k) => { try { return localStorage.getItem(`${SEGMENTO.id}:${k}`) || ''; } catch { return ''; } };
 const PAPEL = { dono: 'Administrador', gestor: 'Gestor', usuario: U.papel && U.papel !== 'Usuário' ? `Usuário (${U.papel})` : 'Usuário', suporte: 'Desenvolvedor' };
 
 export function criarApp(def) {
@@ -127,9 +134,9 @@ export function criarApp(def) {
   }
   function avisoAssinatura() {
     const e = store.empresa();
-    if (!e || e.demo) return '';
+    if (!e || e.demo || interna()) return '';
     if (!e.liberada) return `<div class="aviso crit">${icon('alert')}<span class="grow"><b>Assinatura ${e.situacao === 'teste' ? 'do período de teste encerrada' : 'vencida'}.</b> Os dados estão disponíveis só para consulta.</span>${gestao ? '<a href="#/config" class="btn sm">Ver assinatura</a>' : ''}</div>`;
-    if (gestao && e.situacao === 'teste' && e.testeAte) {
+    if (gestao && !EXCLUSIVO && e.situacao === 'teste' && e.testeAte) {
       const dias = Math.round((new Date(e.testeAte + 'T12:00') - new Date(today() + 'T12:00')) / 86400000);
       if (dias <= 7) return `<div class="aviso">${icon('clock')}<span class="grow">Período de teste termina ${dias <= 0 ? 'hoje' : `em ${dias} dia${dias > 1 ? 's' : ''}`}.</span><a href="#/config" class="btn sm">Assinar</a></div>`;
     }
@@ -168,46 +175,50 @@ export function criarApp(def) {
 
   // ---------- Login ----------
   let telaLogin = 'entrar';
-  const caixa = (sub, corpo, acao) => `<div class="login"><form class="box col" data-onsubmit="${acao}" style="gap:14px">
-    ${SEGMENTO.logo ? `<img class="logo" src="${asset(SEGMENTO.logo)}" alt="" style="background:var(--primaria-escura);padding:12px;border-radius:14px">` : `<div class="ea-cab">${tile}${nomeMarca}<small>${esc(sub)}</small></div>`}${corpo}</form></div>`;
+  // na entrada única, o topo do login troca entre e-mail e senha (Gestão) e código + PIN (usuário)
+  const trocaEntrada = () => UNICA && !store.espelho ? `<div class="seg" style="align-self:center"><button type="button" class="${gestao ? 'on' : ''}" ${gestao ? '' : 'data-act="trocarEntrada" data-v="gestao"'}>${esc(SEGMENTO.gestao.curto)}</button><button type="button" class="${gestao ? '' : 'on'}" ${gestao ? 'data-act="trocarEntrada" data-v="usuario"' : ''}>${esc(U.curto)}</button></div>` : '';
+  const caixa = (sub, corpo, acao, troca = false) => `<div class="login"><form class="box col" data-onsubmit="${acao}" style="gap:14px">
+    ${SEGMENTO.logo ? `<img class="logo" src="${asset(SEGMENTO.logo)}" alt="" style="background:var(--primaria-escura);padding:12px;border-radius:14px">` : `<div class="ea-cab">${tile}${nomeMarca}<small>${esc(UNICA ? '' : sub)}</small></div>`}${troca ? trocaEntrada() : ''}${corpo}</form></div>`;
 
   function vLoginGestao() {
     if (store.modo === 'local') return caixa(`${SEGMENTO.gestao.curto} · demonstração`, `
       <div class="small muted center">Digite o PIN para entrar</div>
       <div class="pin">${[0, 1, 2, 3].map((i) => `<input inputmode="numeric" maxlength="1" name="p${i}" data-oninput="pin" autocomplete="off">`).join('')}</div>
-      <button class="btn lg block">Entrar</button><div class="tiny muted center">Demonstração: PIN 0000 · dados fictícios, só neste navegador</div>`, 'loginDemo');
+      <button class="btn lg block">Entrar</button><div class="tiny muted center">Demonstração: PIN 0000 · dados fictícios, só neste navegador</div>`, 'loginDemo', true);
     const p = store.perfil();
     if (telaLogin === 'empresa' || (p && !p.empresaId)) return caixa(SEGMENTO.gestao.curto, `
       <div class="small center">Conta <b>${esc(p?.email || '')}</b> conectada. Falta ligar a uma empresa:</div>
-      <div class="card col"><b>Sou o administrador (dono da empresa)</b><div class="small muted">Crie sua empresa e use grátis por ${SEGMENTO.diasTeste || 30} dias.</div>
-        <label class="field"><span>Nome da empresa</span><input class="input" name="empresa" autocomplete="organization"></label><button class="btn block" data-act="criarEmpresa">Criar minha empresa</button></div>
+      ${p?.admin ? `<div class="card col"><b>Desenvolvedor</b><div class="small muted">Entre na empresa de testes: acesso total, dados de demonstração e nenhum dado de cliente.</div><button class="btn block" data-act="empresaTestes">Entrar na empresa de testes</button></div>` : ''}
+      ${EXCLUSIVO ? '' : `<div class="card col"><b>Sou o administrador (dono da empresa)</b><div class="small muted">Crie sua empresa e use grátis por ${SEGMENTO.diasTeste || 30} dias.</div>
+        <label class="field"><span>Nome da empresa</span><input class="input" name="empresa" autocomplete="organization"></label><button class="btn block" data-act="criarEmpresa">Criar minha empresa</button></div>`}
       <div class="card col"><b>Recebi um convite</b><label class="field"><span>Código do convite</span><input class="input" name="convite" autocapitalize="characters" style="text-transform:uppercase"></label><button class="btn ghost block" data-act="usarConvite">Entrar com convite</button></div>
       ${p?.admin ? '<a class="btn ghost block" href="#/plataforma" data-act="abrirPlataforma">Plataforma: abrir a empresa de um cliente</a>' : ''}
       <a href="#" class="small center" data-act="logout">Usar outra conta</a>`, 'nada');
-    const novo = telaLogin === 'novo';
+    const novo = telaLogin === 'novo' && !EXCLUSIVO;
     return caixa(SEGMENTO.gestao.curto, `
-      <div class="seg" style="align-self:center"><button type="button" class="${novo ? '' : 'on'}" data-act="telaLogin" data-v="entrar">Entrar</button><button type="button" class="${novo ? 'on' : ''}" data-act="telaLogin" data-v="novo">Criar conta</button></div>
-      <label class="field"><span>E-mail</span><input class="input" name="email" type="email" autocomplete="username" required></label>
+      ${EXCLUSIVO ? '' : `<div class="seg" style="align-self:center"><button type="button" class="${novo ? '' : 'on'}" data-act="telaLogin" data-v="entrar">Entrar</button><button type="button" class="${novo ? 'on' : ''}" data-act="telaLogin" data-v="novo">Criar conta</button></div>`}
+      <label class="field"><span>E-mail</span><input class="input" name="email" type="email" autocomplete="username" value="${esc(novo ? '' : lembrado('ultimo-email'))}" required></label>
       <label class="field"><span>Senha${novo ? ' (mínimo 8 caracteres)' : ''}</span><input class="input" name="senha" type="password" minlength="${novo ? 8 : 1}" autocomplete="${novo ? 'new-password' : 'current-password'}" required></label>
       <button class="btn lg block">${novo ? 'Criar conta' : 'Entrar'}</button>
       ${novo ? `<div class="tiny muted center">Depois você cria sua empresa (${SEGMENTO.diasTeste || 30} dias grátis) ou usa um convite.</div>` : '<a href="#" class="small center" data-act="esqueci">Esqueci minha senha</a>'}
-      <a class="tiny muted center" href="?demo=1">Ver demonstração com dados fictícios</a>`, novo ? 'cadastrar' : 'entrar');
+      ${EXCLUSIVO ? '' : '<a class="tiny muted center" href="?demo=1">Ver demonstração com dados fictícios</a>'}`, novo ? 'cadastrar' : 'entrar', true);
   }
   function vLoginUsuario() {
     return caixa(U.curto, `
       <div class="small muted center">Use o código e o PIN que você recebeu${store.modo === 'local' ? ' (demonstração: veja os acessos em Gestão › Configurações)' : ''}.</div>
-      <label class="field"><span>Código</span><input class="input" name="codigo" autocapitalize="characters" autocomplete="username" style="text-transform:uppercase;font-size:20px;letter-spacing:.1em;text-align:center" required></label>
+      <label class="field"><span>Código</span><input class="input" name="codigo" autocapitalize="characters" autocomplete="username" value="${esc(lembrado('ultimo-codigo'))}" style="text-transform:uppercase;font-size:20px;letter-spacing:.1em;text-align:center" required></label>
       <label class="field"><span>PIN</span><input class="input" name="pin" inputmode="numeric" maxlength="6" autocomplete="current-password" style="font-size:20px;letter-spacing:.3em;text-align:center" required></label>
       <button class="btn lg block">Entrar</button>
-      ${store.modo === 'local' && def.dicaDemo ? `<div class="tiny muted center">${def.dicaDemo}</div>` : ''}`, 'entrarCodigo');
+      ${store.modo === 'local' && def.dicaDemo ? `<div class="tiny muted center">${def.dicaDemo}</div>` : ''}`, 'entrarCodigo', true);
   }
 
   // ---------- Configurações (gestão) ----------
-  const linkUsuario = () => new URL('../usuario/' + (store.modo === 'local' ? '?demo=1' : ''), location.href).href;
+  // um endereço só (app/); ?entrar=usuario abre direto no login de código + PIN
+  const linkUsuario = () => { const u = new URL('../app/', location.href); u.searchParams.set('entrar', 'usuario'); if (store.modo === 'local') u.searchParams.set('demo', '1'); return u.href; };
   // abrir o app de campo de um usuário como ele vê (só leitura)
-  const linkVer = (ref) => { const u = new URL('../usuario/', location.href); u.searchParams.set('ver', ref); if (store.modo === 'local') u.searchParams.set('demo', '1'); return u.href; };
+  const linkVer = (ref) => { const u = new URL('../app/', location.href); u.searchParams.set('ver', ref); if (store.modo === 'local') u.searchParams.set('demo', '1'); return u.href; };
   const msgAcesso = (a, doc) => `Olá${doc?.nome ? ', ' + String(doc.nome).split(' ')[0] : ''}! Este é o app ${SEGMENTO.usuario.nome} da ${store.empresa()?.nome || S().meta.empresa || ''}:\n${linkUsuario()}\n\nCódigo: ${a.codigo}\nPIN: ${a.pin}\n\nPara instalar como app:\n• iPhone: abra o link no Safari › Compartilhar › Adicionar à Tela de Início\n• Android: abra no Chrome › menu ⋮ › Instalar app`;
-  const msgConvite = (codigo, empresa = store.empresa()?.nome || '', dono = false) => `Convite${dono ? ' de administrador' : ''} para a ${SEGMENTO.gestao.nome} (${empresa}):\n${new URL('../gestao/', location.href).href}\n\n1. Toque em "Criar conta" e use seu e-mail\n2. Depois toque em "Entrar com convite"\n3. Código: ${codigo}\n\nO convite vale por 7 dias e pode ser usado uma única vez.`;
+  const msgConvite = (codigo, empresa = store.empresa()?.nome || '', dono = false) => `Convite${dono ? ' de administrador' : ''} para a ${SEGMENTO.gestao.nome} (${empresa}):\n${new URL('../app/?entrar=gestao', location.href).href}\n\n1. Toque em "Criar conta" e use seu e-mail\n2. Depois toque em "Entrar com convite"\n3. Código: ${codigo}\n\nO convite vale por 7 dias e pode ser usado uma única vez.`;
 
   async function pintarAcessos() {
     const el = document.getElementById('ea-acessos');
@@ -236,9 +247,11 @@ export function criarApp(def) {
     } catch (e) { el.textContent = 'Não foi possível carregar a equipe: ' + e.message; }
   }
 
+  const interna = () => store.empresa()?.plano === 'interno';   // empresa de testes do desenvolvedor
   function cardAssinatura() {
     const e = store.empresa();
-    if (!e || e.demo) return '';
+    if (!e || e.demo || interna()) return '';
+    if (EXCLUSIVO && e.liberada) return '';
     const sit = { teste: ['Período de teste', 'info'], ativa: ['Ativa', 'ok'], suspensa: ['Suspensa', 'crit'], cancelada: ['Cancelada', 'crit'] }[e.situacao] || [e.situacao, ''];
     const sup = SEGMENTO.suporte || {};
     const msg = `Olá! Quero assinar o ${SEGMENTO.nome} para a empresa ${e.nome}.`;
@@ -271,6 +284,7 @@ export function criarApp(def) {
           ${nuvem ? `<div class="card col"><h2>Pessoas na Gestão</h2><div id="ea-equipe" class="small muted">Carregando…</div>
             ${store.ehDono() ? `<button class="btn ghost" data-act="convidar">${icon('plus')} Convidar gestor (sócio, escritório)</button><div class="tiny muted">O gestor acessa toda a Gestão, mas não convida nem remove pessoas e não vê o registro de atividades.</div>` : '<div class="tiny muted">Somente o administrador convida ou remove gestores.</div>'}</div>` : ''}
           <div class="card col"><h2>Dados</h2>
+            ${nuvem && interna() ? `<div class="aviso">${icon('info')}<span class="grow"><b>Empresa de testes</b> do desenvolvedor: não é cliente e não entra no faturamento.</span></div><button class="btn ghost" data-act="recomecarTestes">${icon('refresh')} Recomeçar os dados de teste</button>` : ''}
             ${nuvem ? `<div class="small ink2">${icon('check')} Conectado à nuvem. Os dados ficam disponíveis em qualquer aparelho, em tempo real. Seu acesso: <b>${PAPEL[store.perfil()?.papel] || ''}</b>.</div>
               <div class="row wrap"><button class="btn ghost" data-act="backup">${icon('download')} Exportar backup</button><button class="btn ghost" data-act="install">${icon('download')} Instalar app</button><a class="btn ghost" href="?demo=1" target="_blank" rel="noopener">${icon('spark')} Demonstração</a></div>`
             : `<div class="small ink2">Você está na <b>demonstração</b>: dados fictícios salvos só neste navegador.</div>
@@ -327,8 +341,14 @@ export function criarApp(def) {
     try { plat.dados = await store.rpc('plataforma_empresas'); plat.erro = null; } catch (e) { plat.erro = e.message; }
     pintarPlataforma();
     // vindo do painel de gestão: #/plataforma?abrir=<empresa>
+    // #/plataforma?abrir=<empresa>&ver=<ref>: abre a empresa e mostra o app daquele usuário como ele vê (só leitura)
     const pedida = current.pattern === '/plataforma' && current.params?.query?.abrir;
-    if (pedida && plat.dados?.some((e) => e.id === pedida)) { history.replaceState(null, '', location.pathname + location.search + '#/plataforma'); escolherModo(pedida); }
+    const ver = current.params?.query?.ver;
+    if (pedida && plat.dados?.some((e) => e.id === pedida)) {
+      history.replaceState(null, '', location.pathname + location.search + '#/plataforma');
+      if (ver && TEM_USUARIO) { if (await abrirEmpresa(pedida, 'leitura', { semIr: true })) location.href = linkVer(ver); }
+      else escolherModo(pedida);
+    }
   }
   function escolherModo(id) {
     const e = plat.dados.find((x) => x.id === id);
@@ -363,7 +383,7 @@ export function criarApp(def) {
       <div class="center"><img src="${n.qr}" alt="QR code" width="190" height="190" style="background:#fff;padding:8px;border-radius:12px"></div>
       <div class="tiny muted center">Sem câmera? Digite a chave no app: <code style="user-select:all;word-break:break-all">${esc(n.segredo)}</code></div>`);
   }
-  async function abrirEmpresa(id, modo) {
+  async function abrirEmpresa(id, modo, { semIr = false } = {}) {
     const e = plat.dados?.find((x) => x.id === id);
     if (modo === 'edicao' && !(await confirmar(`Abrir ${esc(e?.nome || 'a empresa')} para ver e corrigir? O que você mudar fica na conta do cliente.`, { ok: 'Abrir' }))) return;
     try {
@@ -372,9 +392,11 @@ export function criarApp(def) {
       if (!ok) throw new Error('não consegui abrir a empresa');
       ia?.limpar();
       await def.aposEntrar?.();
+      if (semIr) return true;
       toast(`${e?.nome || 'Empresa'} aberta ${modo === 'edicao' ? 'para ver e corrigir' : 'só para ver'}`);
       location.hash = INICIO; go();
-    } catch (err) { toast(/MFA/.test(err.message) ? 'Confirme a verificação em duas etapas' : err.message); }
+      return true;
+    } catch (err) { toast(/MFA/.test(err.message) ? 'Confirme a verificação em duas etapas' : err.message); return false; }
   }
   const SIT = { teste: ['Teste', 'info'], ativa: ['Ativa', 'ok'], suspensa: ['Suspensa', 'crit'], cancelada: ['Cancelada', ''] };
   function pintarPlataforma() {
@@ -448,7 +470,7 @@ export function criarApp(def) {
     resetCharts();
     const ok = logado();
     // desenvolvedor sem empresa (o normal): vai direto para a Plataforma
-    if (gestao && !ok && store.ehAdmin() && pattern !== '/plataforma' && store.modo === 'nuvem') { location.hash = '#/plataforma'; return; }
+    if (gestao && !ok && store.ehAdmin() && !store.perfil()?.empresaId && pattern !== '/plataforma' && store.modo === 'nuvem') { entrarTestes(); return; }
     const adminSolto = gestao && pattern === '/plataforma' && store.ehAdmin();
     store.setSomenteLeitura(!!(ok && ((store.empresa() && !store.empresa().liberada) || store.suporte()?.modo === 'leitura' || (!gestao && store.espelho))));
     root.innerHTML = ok || adminSolto ? view(params) : gestao ? vLoginGestao() : vLoginUsuario();
@@ -463,7 +485,26 @@ export function criarApp(def) {
   function rerender() { const y = scrollY; render(current.view, current.params, current.pattern); scrollTo(0, y); }
   const go = router(ROTAS.map(([p, v]) => [p, v]), render);
 
-  async function depoisDeEntrar() { await def.aposEntrar?.(); if (!location.hash || location.hash === '#/') location.hash = INICIO; go(); }
+  // Desenvolvedor entrando direto no app: vai para a empresa de testes (criada na 1ª vez, com dados de demonstração)
+  let testando = false;
+  async function entrarTestes() {
+    if (testando) return;
+    testando = true;
+    root.innerHTML = `<div class="ea-abertura">${tile}${nomeMarca}</div>`;
+    try {
+      await store.rpc('plataforma_empresa_testes');
+      if (!(await store.reiniciar())) throw new Error('empresa de testes indisponível');
+      if (COLECOES_SEG.every((c) => !(S()[c] || []).length)) preencherTestes();
+      await def.aposEntrar?.();
+      if (!location.hash || location.hash === '#/' || location.hash.startsWith('#/plataforma')) location.hash = INICIO;
+    } catch (e) { console.warn(e); location.hash = '#/plataforma'; }
+    testando = false;
+    go();
+  }
+  const COLECOES_SEG = Object.keys(SEGMENTO.colecoes);
+  function preencherTestes() { const d = seed(); store.commit((s) => { for (const c of COLECOES_SEG) s[c] = d[c] || []; }); }
+
+  async function depoisDeEntrar() { if (!store.espelho) lembrar('entrada', tipo); await def.aposEntrar?.(); if (!location.hash || location.hash === '#/') location.hash = INICIO; go(); }
   const comAguarde = async (btn, fn) => { const b = btn?.querySelector?.('button.btn.lg, button.btn') || btn; if (b) b.disabled = true; try { await fn(); } catch (e) { toast(e.message); } finally { if (b) b.disabled = false; } };
 
   const comuns = {
@@ -478,14 +519,14 @@ export function criarApp(def) {
     atualizarApp: () => verificarAtualizacao(true),
     eaiAbrir: () => ia?.abrir(),
     eaiMais: () => { const itens = itensMais(); if (ia) ia.menuMais(itens, { aoEscolher: escolherMais }); else if (itens.length) escolherMais(itens[0]); },
-    fecharEspelho: () => { window.close(); setTimeout(() => { location.href = new URL('../gestao/' + (store.modo === 'local' ? '?demo=1' : ''), location.href).href; }, 150); },
+    fecharEspelho: () => { window.close(); setTimeout(() => { location.href = new URL('../app/' + (store.modo === 'local' ? '?demo=1' : ''), location.href).href; }, 150); },
     logout: async () => {
       if (!gestao && store.espelho) return comuns.fecharEspelho(); ia?.limpar(); await store.sair(); telaLogin = 'entrar'; location.hash = INICIO; rerender(); },
     // login
     pin: (el) => { if (el.value && el.nextElementSibling) el.nextElementSibling.focus(); const f = el.form; if ([...f.querySelectorAll('.pin input')].every((i) => i.value)) f.requestSubmit(); },
     loginDemo: (f) => { const pin = [0, 1, 2, 3].map((i) => f.elements['p' + i].value).join(''); if (store.entrarDemoGestao(pin)) depoisDeEntrar(); else { toast('PIN incorreto'); f.reset(); f.elements.p0.focus(); } },
     telaLogin: (el) => { telaLogin = el.dataset.v; rerender(); },
-    entrar: (f) => comAguarde(f, async () => { const ok = await store.entrarEmail(f.email.value.trim(), f.senha.value); if (!ok) telaLogin = 'empresa'; await depoisDeEntrar(); }),
+    entrar: (f) => comAguarde(f, async () => { const ok = await store.entrarEmail(f.email.value.trim(), f.senha.value); lembrar('ultimo-email', f.email.value.trim()); if (!ok) telaLogin = 'empresa'; await depoisDeEntrar(); }),
     cadastrar: (f) => comAguarde(f, async () => {
       const temSessao = await store.cadastrar(f.email.value.trim(), f.senha.value);
       if (!temSessao) return modal({ title: 'Confirme seu e-mail', body: `<p class="small">Enviamos um link para <b>${esc(f.email.value)}</b>. Abra o e-mail, toque no link e depois entre com seu e-mail e senha.</p>` });
@@ -494,9 +535,12 @@ export function criarApp(def) {
     criarEmpresa: (el) => comAguarde(el, async () => { const nome = el.form.empresa.value.trim(); if (nome.length < 2) throw new Error('Informe o nome da empresa'); await store.criarEmpresa(nome); toast('Empresa criada. Bem-vindo!'); await depoisDeEntrar(); }),
     usarConvite: (el) => comAguarde(el, async () => { await store.entrarConvite(el.form.convite.value.trim()); toast('Convite aceito'); await depoisDeEntrar(); }),
     abrirPlataforma: () => { location.hash = '#/plataforma'; go(); },
+    trocarEntrada: (el) => { lembrar('entrada', el.dataset.v); const u = new URL(location.href); u.searchParams.delete('entrar'); u.hash = ''; location.replace(u.href); },
+    empresaTestes: () => entrarTestes(),
+    recomecarTestes: () => confirmar('Apagar o que está na empresa de testes e carregar os dados de demonstração de novo?', { ok: 'Recomeçar' }).then((y) => { if (y && interna()) { preencherTestes(); toast('Dados de teste recarregados'); } }),
     esqueci: () => modal({ title: 'Redefinir senha', body: '<form id="fes" class="col"><label class="field"><span>E-mail</span><input class="input" name="email" type="email"></label></form>', foot: '<button class="btn" data-act="ok">Enviar link</button>',
       handlers: { ok: async () => { try { await store.redefinirSenha(new FormData(document.getElementById('fes')).get('email')); closeModal(); toast('Link enviado para o seu e-mail'); } catch (e) { toast(e.message); } } } }),
-    entrarCodigo: (f) => comAguarde(f, async () => { await store.entrarCodigo(f.codigo.value, f.pin.value); if (store.modo === 'nuvem' || (await store.init(tipo))) await depoisDeEntrar(); }),
+    entrarCodigo: (f) => comAguarde(f, async () => { await store.entrarCodigo(f.codigo.value, f.pin.value); lembrar('ultimo-codigo', String(f.codigo.value).trim().toUpperCase()); if (store.modo === 'nuvem' || (await store.init(tipo))) await depoisDeEntrar(); }),
     // configurações
     salvarEmpresa: async (f) => {
       const d = lerForm(f);

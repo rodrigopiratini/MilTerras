@@ -2,7 +2,7 @@
 // Rede primeiro (sempre a versão mais nova), cache como reserva. A lista CORE é preenchida pelo
 // pages.yml a cada publicação (todos os arquivos do site), assim o app funciona offline desde a 1ª visita.
 const VERSION = 'ea-dev';
-const CORE = ['./', 'index.html', 'gestao/', 'usuario/'];
+const CORE = ['./', 'index.html', 'app/', 'gestao/', 'usuario/'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(VERSION).then((c) => Promise.all(CORE.map((p) => c.add(new URL(p, self.registration.scope)).catch(() => {})))).then(() => self.skipWaiting()));

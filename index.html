@@ -6,8 +6,8 @@
 <title>Mil Terras</title>
 <meta name="description" content="Vinhos exclusivos em consignação: estoque, remessas, vendas e fechamentos com os parceiros.">
 <meta name="theme-color" content="#4A1019">
-<link rel="icon" href="assets/icons/gestao-192.png?v=28e4673e">
-<link rel="apple-touch-icon" href="assets/icons/gestao-180.png?v=28e4673e">
+<link rel="icon" href="assets/icons/app-192.png?v=1fd7e320">
+<link rel="apple-touch-icon" href="assets/icons/app-180.png?v=1fd7e320">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Poppins:wght@500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="src/css/base.css"><link rel="stylesheet" href="src/css/segmento.css">
@@ -15,7 +15,7 @@
   .hub { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 26px; padding: 32px 16px; background: radial-gradient(120% 80% at 50% 0%, var(--primaria), var(--primaria-escura) 70%); }
   .hub h1 { color: #fff; font-size: 34px; text-align: center; }
   .hub .tagline { color: var(--destaque-claro); text-align: center; margin-top: -14px; max-width: 520px; }
-  .hub .cards { display: grid; grid-template-columns: repeat(2, minmax(0, 300px)); gap: 16px; width: 100%; justify-content: center; }
+  .hub .cards { display: grid; grid-template-columns: minmax(0, 340px); gap: 16px; width: 100%; justify-content: center; }
   .hub a.card { display: flex; flex-direction: column; gap: 10px; color: var(--ink); transition: transform .15s; }
   .hub a.card:hover { transform: translateY(-3px); }
   .hub a.card img { width: 56px; height: 56px; border-radius: 14px; }
@@ -29,13 +29,11 @@
   <img src="assets/logo/logo_h_negativo.png" alt="Mil Terras" style="width:min(300px,70vw)">
   <div class="tagline">Vinhos exclusivos em consignação: estoque, remessas, vendas e fechamentos com os parceiros.</div>
   <div class="cards">
-    <a class="card" href="gestao/"><img src="assets/icons/gestao-192.png?v=28e4673e" alt=""><h2>Mil Terras Gestão</h2><div class="small ink2">Estoque, consignação, fechamentos e financeiro da Mil Terras.</div><span class="btn sm" style="align-self:flex-start">Abrir</span></a>
-    <a class="card" href="usuario/"><img src="assets/icons/usuario-192.png?v=28e4673e" alt=""><h2>Mil Terras Parceiro</h2><div class="small ink2">Para restaurantes, bares e lojas: registrar vendas, pedir reposição e fazer o fechamento.</div><span class="btn sm gold" style="align-self:flex-start">Abrir</span></a>
+    <a class="card" href="app/"><img src="assets/icons/app-192.png?v=1fd7e320" alt=""><h2>Mil Terras</h2><div class="small ink2">Um app só: a gestão entra com e-mail e senha; os parceiros entram com código e PIN.</div><span class="btn sm" style="align-self:flex-start">Abrir o app</span></a>
   </div>
-  <div class="foot">No iPhone: abra no Safari › Compartilhar › Adicionar à Tela de Início.<br><br>
-    Quer conhecer antes? Demonstração com dados fictícios (fica só neste navegador):<br>
-    <a href="gestao/?demo=1">Gestão demo</a> · <a href="usuario/?demo=1">Parceiro demo</a></div>
+  
 </div>
+<script>location.replace('app/' + location.search + location.hash);</script>
 <script>if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(() => {});</script>
 </body>
 </html>

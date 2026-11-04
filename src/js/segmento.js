@@ -10,6 +10,8 @@ export const SEGMENTO = {
   slogan: 'Vinhos exclusivos em consignação: estoque, remessas, vendas e fechamentos com os parceiros.',
   icone: 'wine',
   logo: 'assets/logo/logo_h_negativo.png',
+  simbolo: 'assets/logo/simbolo_negativo.png',      // ícone do app: o símbolo da marca do cliente
+  exclusivo: true,                       // app de um cliente só: sem cadastro livre, teste nem planos
 
   suporte: { nome: 'EasyApp', whatsapp: '', email: '' },
   plataforma: { admins: [] },

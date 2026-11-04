@@ -279,6 +279,7 @@ export function criarNuvem(app, hooks) {
       await sb.rpc('suporte_sair');
       return recomecar();
     },
+    reiniciar: () => recomecar(),   // perfil mudou (ex.: empresa de testes criada): recarrega tudo e volta a ouvir
     rpc: async (fn, args) => { const { data, error } = await sb.rpc(fn, args); if (error) throw new Error(error.message); return data; },
     recarregar: async () => { await lerPerfil(); await carregar(); hooks.onChange?.('recarregado', true); },
   };

@@ -7,7 +7,7 @@ e dentro da pasta atendem todas as empresas daquele segmento.
 ## O que já vem pronto (não reescreva)
 | Peça | Onde |
 |---|---|
-| Dois apps PWA (Gestão + Usuário), instaláveis no iPhone/Android, funcionam sem internet | `gestao/`, `usuario/`, `sw.js` |
+| **Um app só** (PWA, instalável no iPhone/Android, funciona sem internet): o login decide o que abre — e-mail e senha → Gestão; código + PIN → app do usuário. As duas sessões ficam guardadas no aparelho | `app/`, `src/js/core/entrada.js`, `sw.js` (`gestao/` e `usuario/` continuam como o mesmo app, para os já instalados) |
 | Várias empresas no mesmo banco, cada uma isolada | `supabase/base.sql` |
 | Cadastro livre do dono com período de teste, convite de gestores, login do usuário por código + PIN | `src/js/core/app.js` |
 | Assinatura: teste / ativa / suspensa, bloqueio de gravações quando vence, painel **Plataforma** | `base.sql` + `core/app.js` |
@@ -23,13 +23,13 @@ e dentro da pasta atendem todas as empresas daquele segmento.
 ## Níveis de acesso (iguais em todos os apps)
 | Nível | Quem | Como entra | O que pode |
 |---|---|---|---|
-| **Desenvolvedor** | quem cuida da fábrica (`<pasta>.plataforma_admins`) | e-mail na Gestão › Plataforma | todas as empresas: assinatura, convite de administrador, **Ver / Corrigir** (2 h, com verificação em duas etapas) |
+| **Desenvolvedor** | quem cuida da fábrica (`<pasta>.plataforma_admins`) | e-mail no app: entra na **empresa de testes** (plano `interno`, dados de demonstração, fora das listas e do faturamento) | todas as empresas pela Plataforma ou pelo painel EasyAPP Gestão: assinatura, convite de administrador, **Ver / Corrigir** e **entrar como** um usuário (2 h, com verificação em duas etapas) |
 | **Administrador** | o dono da empresa cliente (papel `dono`) | e-mail na Gestão | tudo da empresa; convida e remove gestores; vê o registro de atividades |
 | **Gestor** | alguém delegado pelo Administrador (papel `gestor`) | e-mail na Gestão, por convite | toda a Gestão, sem convidar/remover pessoas nem ver o registro |
-| **Usuário** | o pessoal de ponta: motorista, parceiro, técnico (papel `usuario`) | código + PIN no app de campo | só o que é dele (regras das coleções) |
+| **Usuário** | o pessoal de ponta: motorista, parceiro, técnico (papel `usuario`) | código + PIN no mesmo app (sessão anônima do aparelho; conta de e-mail nunca vira usuário) | só o que é dele (regras das coleções); nada da Gestão |
 
 ## O que cada segmento escreve
-1. `src/js/segmento.js`: nome, cores do ícone, planos, quem é o usuário (motorista, parceiro, técnico) e as **coleções** com as regras de acesso.
+1. `src/js/segmento.js`: nome, cores do ícone, `exclusivo: true` (app de um cliente só, com a marca dele: sem cadastro livre, teste nem planos), `simbolo` (ícone com o símbolo do cliente), planos, quem é o usuário (motorista, parceiro, técnico) e as **coleções** com as regras de acesso.
 2. `src/css/segmento.css`: as cores da marca.
 3. `src/js/dominio.js`: as regras e os cálculos do negócio.
 4. `src/js/gestao/app.js` e `src/js/usuario/app.js`: as telas.

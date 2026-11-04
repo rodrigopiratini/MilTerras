@@ -356,6 +356,8 @@ language plpgsql security definer set search_path = milterras, public, extension
 declare v_codigo text := upper(trim(p_codigo)); v_a milterras.acessos; v_t milterras.tentativas_login;
 begin
   if auth.uid() is null then raise exception 'Sessão inválida'; end if;
+  -- código + PIN só entra por uma sessão própria do aparelho (anônima); conta de e-mail nunca vira usuário de campo
+  if not coalesce((auth.jwt()->>'is_anonymous')::boolean, false) then raise exception 'Para entrar com código e PIN, saia da conta de e-mail.'; end if;
   select * into v_t from milterras.tentativas_login where codigo = v_codigo;
   if v_t.bloqueado_ate is not null and v_t.bloqueado_ate > now() then raise exception 'Muitas tentativas. Tente novamente em alguns minutos.'; end if;
   select * into v_a from milterras.acessos where codigo = v_codigo and pin = trim(p_pin) and ativo;
@@ -504,7 +506,7 @@ begin
            (select count(*) from milterras.acessos a where a.empresa_id = e.id and a.ativo) usuarios,
            (select count(*) from milterras.docs d where d.empresa_id = e.id) registros,
            (select max(em) from milterras.atividade a where a.empresa_id = e.id) "ultimoUso"
-      from milterras.empresas e) x), '[]'::json);
+      from milterras.empresas e where e.plano <> 'interno') x), '[]'::json);
 end $$;
 
 create or replace function milterras.plataforma_atualizar(p_empresa uuid, p_situacao text, p_plano text, p_teste_ate date, p_pago_ate date, p_valor numeric, p_obs text) returns void
@@ -515,12 +517,28 @@ begin
          pago_ate = p_pago_ate, valor_mensal = p_valor, obs = nullif(trim(p_obs), '') where id = p_empresa;
 end $$;
 
+-- Desenvolvedor entrando direto no app: a empresa de testes dele (acesso total, sem dados de clientes).
+-- Plano 'interno': não aparece na Plataforma nem no painel e não conta no faturamento.
+create or replace function milterras.plataforma_empresa_testes() returns uuid
+language plpgsql security definer set search_path = milterras, public, extensions as $$
+declare v_id uuid;
+begin
+  if not milterras.eh_admin() then raise exception 'Sem permissão'; end if;
+  select empresa_id into v_id from milterras.perfis where user_id = auth.uid();
+  if v_id is not null then return v_id; end if;
+  insert into milterras.empresas (nome, criado_por, plano, situacao, teste_ate, obs)
+  values ('Testes do desenvolvedor', auth.uid(), 'interno', 'ativa', current_date + 3650, 'Empresa de testes do desenvolvedor (não é cliente)')
+  returning id into v_id;
+  insert into milterras.perfis (user_id, empresa_id, papel) values (auth.uid(), v_id, 'dono');
+  return v_id;
+end $$;
+
 -- ---------- Permissões das funções ----------
 do $$ declare f text; begin
   foreach f in array array['criar_empresa(text)', 'entrar_convite(text)', 'vincular_usuario(text, text)', 'criar_convite(text)', 'equipe()',
     'remover_gestor(uuid)', 'cancelar_convite(text)', 'registrar_acesso()', 'sinal()', 'atividade_log(timestamptz, uuid, timestamptz, int)',
     'plataforma_empresas()', 'plataforma_atualizar(uuid, text, text, date, date, numeric, text)', 'meu_perfil()',
-    'suporte_abrir(uuid, text)', 'suporte_sair()', 'plataforma_convite_dono(uuid)'] loop
+    'suporte_abrir(uuid, text)', 'suporte_sair()', 'plataforma_convite_dono(uuid)', 'plataforma_empresa_testes()'] loop
     execute format('revoke all on function milterras.%s from public, anon', f);
     execute format('grant execute on function milterras.%s to authenticated', f);
   end loop;

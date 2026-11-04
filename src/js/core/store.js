@@ -118,6 +118,7 @@ export const entrarConvite = (c) => nuvem.entrarConvite(c);
 export const redefinirSenha = (e) => nuvem.redefinirSenha(e);
 export const novaSenha = (s) => nuvem.novaSenha(s);
 export const recarregar = () => nuvem?.recarregar();
+export const reiniciar = () => nuvem?.reiniciar();
 export const rpc = (fn, args) => nuvem.rpc(fn, args);
 // Login atual (para as funções do Supabase chamadas com fetch, como o assistente)
 export const token = async () => (modo === 'nuvem' ? (await nuvem?.sb.auth.getSession())?.data?.session?.access_token || null : null);
