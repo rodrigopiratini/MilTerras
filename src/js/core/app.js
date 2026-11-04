@@ -101,7 +101,7 @@ export function criarApp(def) {
 
   // ---------- Navegação ----------
   const extrasNav = () => gestao ? [
-    ['#/atividade', 'users', 'Atividade', () => SEGMENTO.atividade !== false && store.ehDono() && store.modo === 'nuvem'], // segmento.js: atividade: false tira do menu
+    ['#/atividade', 'users', 'Atividade', () => SEGMENTO.atividade !== false && store.ehAdmin() && store.modo === 'nuvem'], // só o desenvolvedor // segmento.js: atividade: false tira do menu
     ['#/plataforma', 'building', 'Plataforma', () => store.ehAdmin()],
     ['#/config', 'gear', 'Configurações', () => true],
   ] : [['#/conta', 'user', 'Minha conta', () => true]];
@@ -283,7 +283,7 @@ export function criarApp(def) {
             ${nuvem ? '' : `<label class="field"><span>PIN da gestão (demonstração)</span><input class="input" name="pinGestao" inputmode="numeric" maxlength="4" value="${esc(s.meta.pinGestao || '0000')}"></label>`}
             <button class="btn">Salvar</button></form></div>
           ${nuvem ? `<div class="card col"><h2>Pessoas na Gestão</h2><div id="ea-equipe" class="small muted">Carregando…</div>
-            ${store.ehDono() ? `<button class="btn ghost" data-act="convidar">${icon('plus')} Convidar gestor (sócio, escritório)</button><div class="tiny muted">O gestor acessa toda a Gestão, mas não convida nem remove pessoas e não vê o registro de atividades.</div>` : '<div class="tiny muted">Somente o administrador convida ou remove gestores.</div>'}</div>` : ''}
+            ${store.ehDono() ? `<button class="btn ghost" data-act="convidar">${icon('plus')} Convidar gestor (sócio, escritório)</button><div class="tiny muted">O gestor acessa toda a Gestão, mas não convida nem remove pessoas.</div>` : '<div class="tiny muted">Somente o administrador convida ou remove gestores.</div>'}</div>` : ''}
           <div class="card col"><h2>Dados</h2>
             ${nuvem && interna() ? `<div class="aviso">${icon('info')}<span class="grow"><b>Empresa de testes</b> do desenvolvedor: não é cliente e não entra no faturamento.</span></div><button class="btn ghost" data-act="recomecarTestes">${icon('refresh')} Recomeçar os dados de teste</button>` : ''}
             ${nuvem ? `<div class="small ink2">${icon('check')} Conectado à nuvem. Os dados ficam disponíveis em qualquer aparelho, em tempo real. Seu acesso: <b>${PAPEL[store.perfil()?.papel] || ''}</b>.</div>
@@ -296,7 +296,7 @@ export function criarApp(def) {
       </div>`);
   }
 
-  // ---------- Registro de atividades (somente o administrador) ----------
+  // ---------- Registro de atividades (somente o desenvolvedor) ----------
   const atv = { chave: null, dados: null, erro: null };
   const ACAO = { insert: 'criou', update: 'alterou', delete: 'apagou' };
   const nomeColecao = (c) => SEGMENTO.colecoes[c]?.nome || { config: 'Configurações', acessos: 'Acessos', perfis: 'Perfis' }[c] || c;
@@ -331,7 +331,7 @@ export function criarApp(def) {
   }
   function vAtividade({ query }) {
     const p = query.p || '7d';
-    return tela('Atividade', `${pageHead('Registro de atividades', 'Quem fez o quê, em qualquer aparelho. Só o administrador vê.', busca('Buscar pessoa…'))}
+    return tela('Atividade', `${pageHead('Registro de atividades', 'Quem fez o quê, em qualquer aparelho. Só o desenvolvedor vê.', busca('Buscar pessoa…'))}
       <div class="seg mb">${[['hoje', 'Hoje'], ['7d', '7 dias'], ['30d', '30 dias'], ['tudo', 'Tudo']].map(([v, n]) => `<button class="${p === v ? 'on' : ''}" data-act="goto" data-h="#/atividade?p=${v}${query.u ? '&u=' + query.u : ''}">${n}</button>`).join('')}${query.u ? '<button data-act="goto" data-h="#/atividade">Todas as pessoas ✕</button>' : ''}</div>
       <div id="ea-atividade"></div>`);
   }

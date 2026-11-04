@@ -167,14 +167,14 @@ export function criarNuvem(app, hooks) {
     sinalPresenca();
     return true;
   }
-  // Presença: enquanto o app está aberto e visível, avisa o banco a cada 2 minutos (o painel mostra quem está conectado).
+  // Presença: enquanto o app está aberto e visível, avisa o banco a cada minuto (o painel mostra quem está conectado).
   // O modo suporte não conta como presença do cliente.
   let presenca = null;
   function sinalPresenca() {
     if (suporte() || presenca) return;
     const bater = () => { if (document.visibilityState === 'visible') sb.rpc('sinal').then(() => {}, () => {}); };
     bater();
-    presenca = setInterval(bater, 120000);
+    presenca = setInterval(bater, 60000);   // a cada minuto (o painel considera conectado quem deu sinal nos últimos 3 min)
     document.addEventListener('visibilitychange', bater);
   }
 

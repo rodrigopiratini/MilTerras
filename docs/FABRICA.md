@@ -24,8 +24,8 @@ e dentro da pasta atendem todas as empresas daquele segmento.
 | Nível | Quem | Como entra | O que pode |
 |---|---|---|---|
 | **Desenvolvedor** | quem cuida da fábrica (`<pasta>.plataforma_admins`) | e-mail no app: entra na **empresa de testes** (plano `interno`, dados de demonstração, fora das listas e do faturamento) | todas as empresas pela Plataforma ou pelo painel EasyAPP Gestão: assinatura, convite de administrador, **Ver / Corrigir** e **entrar como** um usuário (2 h, com verificação em duas etapas) |
-| **Administrador** | o dono da empresa cliente (papel `dono`) | e-mail na Gestão | tudo da empresa; convida e remove gestores; vê o registro de atividades |
-| **Gestor** | alguém delegado pelo Administrador (papel `gestor`) | e-mail na Gestão, por convite | toda a Gestão, sem convidar/remover pessoas nem ver o registro |
+| **Administrador** | o dono da empresa cliente (papel `dono`) | e-mail na Gestão | tudo da empresa; convida e remove gestores (o registro de atividades é só do desenvolvedor) |
+| **Gestor** | alguém delegado pelo Administrador (papel `gestor`) | e-mail na Gestão, por convite | toda a Gestão, sem convidar/remover pessoas |
 | **Usuário** | o pessoal de ponta: motorista, parceiro, técnico (papel `usuario`) | código + PIN no mesmo app (sessão anônima do aparelho; conta de e-mail nunca vira usuário) | só o que é dele (regras das coleções); nada da Gestão |
 
 ## O que cada segmento escreve

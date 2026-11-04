@@ -495,7 +495,8 @@ create or replace function milterras.atividade_log(p_antes timestamptz default n
 language plpgsql stable security definer set search_path = milterras, public, extensions as $$
 declare v_emp uuid := milterras.minha_empresa();
 begin
-  if not milterras.eh_dono(v_emp) then raise exception 'Somente o administrador vê o registro de atividades'; end if;
+  -- só o desenvolvedor (na empresa de testes dele ou visitando a de um cliente); o administrador da empresa não vê
+  if not milterras.eh_admin() or v_emp is null then raise exception 'Somente o desenvolvedor vê o registro de atividades'; end if;
   return json_build_object(
     'itens', coalesce((select json_agg(x order by x.em desc, x.id desc) from (
         select id, em, user_id "userId", papel, quem, ref, acao, colecao, registro, antes, depois from milterras.atividade
