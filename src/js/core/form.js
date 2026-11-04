@@ -86,7 +86,7 @@ export function editar({ titulo, colecao, campos, doc = null, inicial = null, pr
         const bloqueio = antesDeApagar?.(doc);
         if (bloqueio) return confirmar(bloqueio, { ok: 'Entendi', titulo: 'Não dá para excluir' });
         if (!(await confirmar(`Apagar este registro de ${esc(titulo.toLowerCase())}? Não dá para desfazer.`, { ok: 'Apagar' }))) return;
-        store.commit((s) => { s[colecao] = s[colecao].filter((x) => x.id !== doc.id); });
+        if (store.commit((s) => { s[colecao] = s[colecao].filter((x) => x.id !== doc.id); }) === false) return;
         toast('Apagado'); onSalvo?.(null, false);
       },
     },

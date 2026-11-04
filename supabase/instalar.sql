@@ -450,6 +450,9 @@ begin
       v_old := case when tg_op <> 'INSERT' then to_jsonb(old) - 'pin' end; v_new := case when tg_op <> 'DELETE' then to_jsonb(new) - 'pin' end;
       if tg_op = 'UPDATE' and old.pin is distinct from new.pin then v_new := v_new || '{"pinTrocado": true}'; end if;
       v_reg := coalesce(new.ref, old.ref); v_col := 'acessos'; v_emp := coalesce(new.empresa_id, old.empresa_id);
+    elsif tg_table_name = 'empresas' then -- nome da empresa (e assinatura, quando o desenvolvedor muda)
+      v_old := to_jsonb(old); v_new := to_jsonb(new);
+      v_reg := new.id::text; v_col := 'empresa'; v_emp := new.id;
     else
       v_old := case when tg_op <> 'INSERT' then to_jsonb(old) end; v_new := case when tg_op <> 'DELETE' then to_jsonb(new) end;
       v_reg := coalesce(new.user_id, old.user_id)::text; v_col := 'perfis'; v_emp := coalesce(new.empresa_id, old.empresa_id);
@@ -472,6 +475,8 @@ do $$ declare t text; begin
     execute format('drop trigger if exists tg_atividade on milterras.%I', t);
     execute format('create trigger tg_atividade after insert or update or delete on milterras.%I for each row execute function milterras.registrar_atividade()', t);
   end loop;
+  drop trigger if exists tg_atividade on milterras.empresas;
+  create trigger tg_atividade after update on milterras.empresas for each row execute function milterras.registrar_atividade();
 end $$;
 
 create or replace function milterras.registrar_acesso() returns void

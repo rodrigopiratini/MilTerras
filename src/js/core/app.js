@@ -10,7 +10,7 @@
 import * as store from './store.js';
 import { SEGMENTO } from '../segmento.js';
 import { esc, date, today, money0, int } from './fmt.js';
-import { icon, router, delegate, modal, closeModal, confirmar, toast, empty, waLink, download, asset, instalar, bannerInstalar, dispensarBanner, registerSW, verificarAtualizacao, versaoApp, filtrarBusca, buscaInput, iniciais, badge, kpi, moneyInput, parseMoney, stepHandler } from './ui.js';
+import { ROOT, icon, router, delegate, modal, closeModal, confirmar, toast, empty, waLink, download, asset, instalar, bannerInstalar, dispensarBanner, registerSW, verificarAtualizacao, versaoApp, filtrarBusca, buscaInput, iniciais, badge, kpi, moneyInput, parseMoney, stepHandler } from './ui.js';
 import { mountCharts, resetCharts } from './charts.js';
 import { criarAssistente } from './assistente.js';
 import { CONFIG } from '../config.js';
@@ -266,6 +266,7 @@ export function criarApp(def) {
     const s = S();
     const nuvem = store.modo === 'nuvem';
     const campos = def.camposEmpresa || [];
+    const ro = store.ehSomenteLeitura();
     return tela('Configurações', `${pageHead('Configurações')}
       <div class="grid g2">
         <div class="col">
@@ -278,10 +279,10 @@ export function criarApp(def) {
         <div class="col">
           ${cardAssinatura()}
           <div class="card col"><h2>Empresa</h2><form class="col" data-onsubmit="salvarEmpresa">
-            <label class="field"><span>Nome</span><input class="input" name="empresa" value="${esc(store.empresa()?.nome || s.meta.empresa || '')}" ${store.ehDono() || !nuvem ? '' : 'disabled'}></label>
-            ${campos.map(([k, label, ph = '']) => `<label class="field"><span>${label}</span><input class="input" name="${k}" value="${esc(s.meta[k] || '')}" placeholder="${esc(ph)}"></label>`).join('')}
+            <label class="field"><span>Nome</span><input class="input" name="empresa" value="${esc(store.empresa()?.nome || s.meta.empresa || '')}" ${(store.ehDono() || !nuvem) && !ro ? '' : 'disabled'}></label>
+            ${campos.map(([k, label, ph = '']) => `<label class="field"><span>${label}</span><input class="input" name="${k}" value="${esc(s.meta[k] || '')}" placeholder="${esc(ph)}" ${ro ? 'disabled' : ''}></label>`).join('')}
             ${nuvem ? '' : `<label class="field"><span>PIN da gestão (demonstração)</span><input class="input" name="pinGestao" inputmode="numeric" maxlength="4" value="${esc(s.meta.pinGestao || '0000')}"></label>`}
-            <button class="btn">Salvar</button></form></div>
+            ${ro ? '<div class="tiny muted">Somente consulta: alterações desativadas.</div>' : '<button class="btn">Salvar</button>'}</form></div>
           ${nuvem ? `<div class="card col"><h2>Pessoas na Gestão</h2><div id="ea-equipe" class="small muted">Carregando…</div>
             ${store.ehDono() ? `<button class="btn ghost" data-act="convidar">${icon('plus')} Convidar gestor (sócio, escritório)</button><div class="tiny muted">O gestor acessa toda a Gestão, mas não convida nem remove pessoas.</div>` : '<div class="tiny muted">Somente o administrador convida ou remove gestores.</div>'}</div>` : ''}
           <div class="card col"><h2>Dados</h2>
@@ -299,12 +300,13 @@ export function criarApp(def) {
   // ---------- Registro de atividades (somente o desenvolvedor) ----------
   const atv = { chave: null, dados: null, erro: null };
   const ACAO = { insert: 'criou', update: 'alterou', delete: 'apagou' };
-  const nomeColecao = (c) => SEGMENTO.colecoes[c]?.nome || { config: 'Configurações', acessos: 'Acessos', perfis: 'Perfis' }[c] || c;
+  const nomeColecao = (c) => SEGMENTO.colecoes[c]?.nome || { config: 'Configurações', acessos: 'Acessos', perfis: 'Perfis', empresa: 'Empresa' }[c] || c;
   const nomeCampo = (k) => SEGMENTO.campos?.[k] || k;
   function descrever(x) {
     const proprio = def.descreverAtividade?.(x, S());   // o segmento pode descrever do jeito dele (texto em HTML)
     if (proprio) return proprio;
     if (x.acao === 'acesso') return x.papel === 'suporte' ? `abriu a empresa pelo suporte${x.depois?.modo ? ` (${x.depois.modo === 'edicao' ? 'ver e corrigir' : 'só ver'})` : ''}` : 'entrou no app';
+    if (x.colecao === 'empresa' && x.depois?.nome != null) return `mudou o nome da empresa: <b>${esc(x.antes?.nome || '')}</b> → <b>${esc(x.depois.nome)}</b>`;
     const doc = S()[x.colecao]?.find((d) => d.id === x.registro) || x.depois || x.antes || {};
     const nome = doc.nome || doc.titulo || doc.descricao || doc.placa || '';
     const campos = x.acao === 'update' ? Object.keys(x.depois || {}).filter((k) => !['atualizadoEm', 'updatedAt'].includes(k)) : [];
@@ -475,7 +477,7 @@ export function criarApp(def) {
     go();
   }
   const COLECOES_SEG = Object.keys(SEGMENTO.colecoes);
-  function preencherTestes() { const d = seed(); store.commit((s) => { for (const c of COLECOES_SEG) s[c] = d[c] || []; }); }
+  function preencherTestes() { const d = seed(); return store.commit((s) => { for (const c of COLECOES_SEG) s[c] = d[c] || []; }); }
 
   async function depoisDeEntrar() { if (!store.espelho) lembrar('entrada', tipo); await def.aposEntrar?.(); if (!location.hash || location.hash === '#/') location.hash = INICIO; go(); }
   const comAguarde = async (btn, fn) => { const b = btn?.querySelector?.('button.btn.lg, button.btn') || btn; if (b) b.disabled = true; try { await fn(); } catch (e) { toast(e.message); } finally { if (b) b.disabled = false; } };
@@ -508,9 +510,16 @@ export function criarApp(def) {
     criarEmpresa: (el) => comAguarde(el, async () => { const nome = el.form.empresa.value.trim(); if (nome.length < 2) throw new Error('Informe o nome da empresa'); await store.criarEmpresa(nome); toast('Empresa criada. Bem-vindo!'); await depoisDeEntrar(); }),
     usarConvite: (el) => comAguarde(el, async () => { await store.entrarConvite(el.form.convite.value.trim()); toast('Convite aceito'); await depoisDeEntrar(); }),
     abrirPlataforma: () => { location.hash = '#/plataforma'; go(); },
+    abrirDeNovo: () => location.reload(),
+    // limpa só o login guardado deste app (e o cache do service worker) e recarrega: cai na tela de entrar
+    entrarDeNovo: async () => {
+      try { Object.keys(localStorage).filter((k) => k.startsWith(`${SEGMENTO.id}-auth-`)).forEach((k) => localStorage.removeItem(k)); } catch {}
+      try { for (const r of (await navigator.serviceWorker?.getRegistrations()) || []) if (r.scope === ROOT) await r.unregister(); } catch {}
+      location.reload();
+    },
     trocarEntrada: (el) => { lembrar('entrada', el.dataset.v); const u = new URL(location.href); u.searchParams.delete('entrar'); u.hash = ''; location.replace(u.href); },
     empresaTestes: () => entrarTestes(),
-    recomecarTestes: () => confirmar('Apagar o que está na empresa de testes e carregar os dados de demonstração de novo?', { ok: 'Recomeçar' }).then((y) => { if (y && interna()) { preencherTestes(); toast('Dados de teste recarregados'); } }),
+    recomecarTestes: () => confirmar('Apagar o que está na empresa de testes e carregar os dados de demonstração de novo?', { ok: 'Recomeçar' }).then((y) => { if (y && interna() && preencherTestes() !== false) toast('Dados de teste recarregados'); }),
     esqueci: () => modal({ title: 'Redefinir senha', body: '<form id="fes" class="col"><label class="field"><span>E-mail</span><input class="input" name="email" type="email"></label></form>', foot: '<button class="btn" data-act="ok">Enviar link</button>',
       handlers: { ok: async () => { try { await store.redefinirSenha(new FormData(document.getElementById('fes')).get('email')); closeModal(); toast('Link enviado para o seu e-mail'); } catch (e) { toast(e.message); } } } }),
     entrarCodigo: (f) => comAguarde(f, async () => { await store.entrarCodigo(f.codigo.value, f.pin.value); lembrar('ultimo-codigo', String(f.codigo.value).trim().toUpperCase()); if (store.modo === 'nuvem' || (await store.init(tipo))) await depoisDeEntrar(); }),
@@ -520,7 +529,7 @@ export function criarApp(def) {
       try {
         if (d.empresa && d.empresa !== (store.empresa()?.nome || S().meta.empresa)) await store.renomearEmpresa(d.empresa);
         const { empresa: _, ...resto } = d;
-        store.commit((s) => Object.assign(s.meta, resto)); toast('Dados salvos');
+        if (store.commit((s) => Object.assign(s.meta, resto)) !== false) toast('Dados salvos');
       } catch (e) { toast(e.message); }
     },
     criarAcesso: async (el) => { const d = S()[U.colecao].find((x) => x.id === el.dataset.ref); try { await store.acessos.criar(d.id, d.nome); toast('Acesso criado'); pintarAcessos(); } catch (e) { toast(e.message); } },
@@ -552,7 +561,7 @@ export function criarApp(def) {
     if (def.naoRedesenhar?.(current.pattern, externo)) return;
     rerender();
   });
-  store.onErro((m) => toast('Não foi possível salvar: ' + m));
+  store.onErro((m) => toast('Não foi possível salvar: ' + m, { erro: true }));
   store.onRecuperacao(() => modal({ title: 'Criar nova senha', body: '<form id="fns" class="col"><label class="field"><span>Nova senha (mínimo 8 caracteres)</span><input class="input" name="senha" type="password" minlength="8" autocomplete="new-password"></label></form>',
     foot: '<button class="btn" data-act="ok">Salvar senha</button>',
     handlers: { ok: async () => { const v = new FormData(document.getElementById('fns')).get('senha'); if (String(v).length < 8) return toast('Mínimo 8 caracteres'); try { await store.novaSenha(v); closeModal(); toast('Senha alterada'); } catch (e) { toast(e.message); } } } }));
@@ -563,12 +572,25 @@ export function criarApp(def) {
     root.innerHTML = SEGMENTO.logo ? `<div class="login"><div class="marca" style="color:#fff">${esc(SEGMENTO.nome)}</div></div>` : `<div class="ea-abertura">${tile}${nomeMarca}</div>`;
     const erroLink = new URLSearchParams(location.hash.replace(/^#\/?/, '')).get('error_code');
     if (erroLink) history.replaceState(null, '', location.pathname + location.search);
+    // Se a abertura travar (internet ruim, sessão velha guardada no aparelho, erro ao carregar), a pessoa não fica
+    // presa na tela do nome: aparece "Tentar de novo" e "Entrar de novo" (que limpa o login guardado deste app).
+    let aberto = false;
+    const travou = (e) => {
+      if (aberto) return; aberto = true;
+      if (e) console.warn('abertura', e);
+      root.innerHTML = `<div class="ea-abertura">${tile}${nomeMarca}<div class="col" style="align-items:center;gap:12px;max-width:320px;text-align:center;color:#fff">
+        <div class="small" style="opacity:.85">${e ? 'Não deu para abrir o app agora.' : 'Está demorando para abrir.'} Confira a internet e tente de novo.</div>
+        <button class="btn" data-act="abrirDeNovo">Tentar de novo</button>
+        <button class="btn ghost" style="color:#fff;border-color:rgba(255,255,255,.4)" data-act="entrarDeNovo">Entrar de novo</button></div></div>`;
+    };
+    const vigia = setTimeout(() => travou(null), 15000);
     store.init(tipo).then(async (ok) => {
       if (ok) await def.aposEntrar?.();
+      clearTimeout(vigia); aberto = true;   // abriu (mesmo depois do aviso): segue normal
       if (!location.hash || location.hash === '#/') location.hash = INICIO;
       go();
       if (erroLink) modal({ title: 'Link inválido ou expirado', body: '<p class="small">O link do e-mail já foi usado ou expirou. Tente entrar com seu e-mail e senha; se pedir confirmação, use "Criar conta" de novo para receber outro link.</p>' });
-    });
+    }).catch((e) => { clearTimeout(vigia); travou(e); });
   }
 
   return { S, tela, pageHead, busca, lerForm, rerender, iniciar, linkVer, linkUsuario, get current() { return current; }, store, U, ia };

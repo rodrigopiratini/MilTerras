@@ -79,6 +79,7 @@ export function get() {
 // Aplica uma alteração e avisa as telas (e os outros aparelhos / abas)
 let somenteLeitura = false;
 export const setSomenteLeitura = (v) => { somenteLeitura = v; };
+export const ehSomenteLeitura = () => somenteLeitura;
 export function commit(mutator, msg) {
   if (somenteLeitura) { erroHook?.('somente consulta — alterações desativadas'); return false; }
   const s = get();
@@ -129,7 +130,11 @@ export async function funcao(nome, corpo) {
   if (error) throw new Error(error.message);
   return data;
 }
-export const renomearEmpresa = async (nome) => { if (modo === 'nuvem') await nuvem.renomearEmpresa(nome); commit((s) => { s.meta.empresa = nome; }); };
+export const renomearEmpresa = async (nome) => {
+  if (somenteLeitura) throw new Error('somente consulta — alterações desativadas');
+  if (modo === 'nuvem') await nuvem.renomearEmpresa(nome);
+  commit((s) => { s.meta.empresa = nome; });
+};
 
 // Demonstração: gestão entra com PIN; usuário entra com código + PIN dos acessos de demonstração
 export function entrarDemoGestao(pin) {

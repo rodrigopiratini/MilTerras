@@ -117,7 +117,10 @@ export function criarNuvem(app, hooks) {
       setStatus('online');
     } finally { enviando = false; }
   }
-  const traduzir = (m = '') => (/row-level security/i.test(m) ? (perfil?.empresa?.liberada === false ? 'assinatura vencida: os dados estão só para consulta' : 'sem permissão para esta alteração') : m || 'operação recusada pelo servidor');
+  const recusa = () => (suporte()?.modo === 'leitura' ? 'suporte em modo só ver: alterações desativadas' : perfil?.empresa?.liberada === false ? 'assinatura vencida: os dados estão só para consulta' : 'sem permissão para esta alteração');
+  const traduzir = (m = '') => (/row-level security/i.test(m) ? recusa() : m || 'operação recusada pelo servidor');
+  // update/delete barrados pelo RLS não dão erro: só não mexem em nenhuma linha. Sem linha devolvida = recusado.
+  const conferir = ({ data, error }) => { if (error) throw new Error(traduzir(error.message)); if (!data?.length) throw new Error(recusa()); return data; };
   window.addEventListener('online', () => enviar());
   sb.auth.onAuthStateChange((evento) => { if (evento === 'PASSWORD_RECOVERY') setTimeout(() => hooks.onRecuperacao?.(), 300); });
 
@@ -252,10 +255,10 @@ export function criarNuvem(app, hooks) {
     acessos: {
       async listar() { const { data, error } = await sb.from('acessos').select('codigo,ref,nome,pin,ativo').eq('empresa_id', empresa()); if (error) throw new Error(error.message); return data; },
       async criar(ref, nome) { const { data, error } = await sb.from('acessos').insert({ empresa_id: empresa(), ref, nome }).select('codigo,ref,nome,pin,ativo').single(); if (error) throw new Error(traduzir(error.message)); return data; },
-      async alterar(ref, campos) { const { error } = await sb.from('acessos').update(campos).eq('empresa_id', empresa()).eq('ref', ref); if (error) throw new Error(traduzir(error.message)); },
-      async apagar(ref) { const { error } = await sb.from('acessos').delete().eq('empresa_id', empresa()).eq('ref', ref); if (error) throw new Error(error.message); },
+      async alterar(ref, campos) { conferir(await sb.from('acessos').update(campos).eq('empresa_id', empresa()).eq('ref', ref).select('ref')); },
+      async apagar(ref) { conferir(await sb.from('acessos').delete().eq('empresa_id', empresa()).eq('ref', ref).select('ref')); },
     },
-    async renomearEmpresa(nome) { const { error } = await sb.from('empresas').update({ nome }).eq('id', empresa()); if (error) throw new Error(error.message); perfil.empresa.nome = nome; },
+    async renomearEmpresa(nome) { const [e] = conferir(await sb.from('empresas').update({ nome }).eq('id', empresa()).select('nome')); perfil.empresa.nome = e.nome; },
     // ---- Visita de suporte (desenvolvedor) ----
     // Verificação em duas etapas (app autenticador): o banco só abre empresas com a sessão em aal2.
     mfa: {

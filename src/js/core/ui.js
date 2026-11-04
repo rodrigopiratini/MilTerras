@@ -119,12 +119,17 @@ export function confirmar(texto, { ok = 'Confirmar', titulo = 'Confirmar' } = {}
 }
 
 let toastT;
-export function toast(msg) {
+// erro: { erro: true } fica 4 s na tela e um aviso comum logo depois (ex.: "Salvo" de uma tela que não conferiu
+// se a gravação passou) não cobre o erro.
+let erroAte = 0;
+export function toast(msg, { erro = false } = {}) {
+  if (!erro && Date.now() < erroAte) return;
   document.querySelector('.toast')?.remove();
   const t = document.createElement('div');
-  t.className = 'toast'; t.textContent = msg;
+  t.className = 'toast' + (erro ? ' erro' : ''); t.textContent = msg;
   document.body.appendChild(t);
-  clearTimeout(toastT); toastT = setTimeout(() => t.remove(), 2800);
+  if (erro) erroAte = Date.now() + 1500;
+  clearTimeout(toastT); toastT = setTimeout(() => t.remove(), erro ? 4000 : 2800);
 }
 
 // ---------- Peças de interface ----------
