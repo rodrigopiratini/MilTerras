@@ -361,4 +361,5 @@ a.li, .li.click { color: inherit; cursor: pointer; }
 .topbar .ea-barras { height: 18px; } .topbar .ea-barras i { width: 5px; }
 @media (prefers-reduced-motion: reduce) { .ea-barras i, .ea-tile, .ea-nome { animation: none !important; } }
 .topbar .ea-marca { gap: 8px; min-width: 0; }
+.topbar .topo-simbolo { height: 28px; width: auto; max-width: 44px; object-fit: contain; flex: none; }
 .topbar .ea-marca .ea-nome { font-size: 18px; overflow: hidden; text-overflow: ellipsis; }

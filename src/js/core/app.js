@@ -163,7 +163,7 @@ export function criarApp(def) {
       </aside>
       <div>
         <header class="topbar">${back ? `<button data-act="back" aria-label="Voltar">${icon('arrowL')}</button><div class="t ellipsis">${title}</div>`
-          : SEGMENTO.logo ? `<span style="display:grid;place-items:center">${icon(SEGMENTO.icone || 'home')}</span><div class="t ellipsis">${title}</div>`
+          : SEGMENTO.logo ? `<img class="topo-simbolo" src="${asset(SEGMENTO.simbolo || SEGMENTO.logo)}" alt=""><div class="t ellipsis">${esc(store.empresa()?.nome || s.meta.empresa || SEGMENTO.nome)}</div>`
           : `<div class="ea-marca t">${barras}${nomeMarca}</div>`}${def.topoDireita?.(s) || ''}${btIA}</header>
         <main class="main">${avisoSuporte()}${avisoEspelho()}${avisoAssinatura()}${store.modo === 'local' ? `<div class="demo-banner">${icon('info')}<span class="grow">Demonstração com dados fictícios, salvos só neste navegador.</span></div>` : ''}${bannerInstalar()}${content}</main>
       </div>
