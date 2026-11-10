@@ -45,7 +45,11 @@ export function renderWizard(s, w, { modo = 'cliente' } = {}) {
   if (w.step === 1) {
     const pids = Object.keys(w.contagem);
     const transito = D.remessas(s).filter((r) => r.clienteId === w.cid && r.status !== 'entregue');
-    body = `<p class="small ink2" style="margin-top:0">Conte as garrafas Mil Terras que estão no estabelecimento agora. Já deixamos preenchido o que o sistema espera, a partir das vendas lançadas no app. <b>Se a contagem for diferente do esperado, informe o motivo.</b></p>
+    const gestor = modo === 'gestor';
+    body = gestor
+      ? `<p class="small ink2" style="margin-top:0">Informe quantas garrafas de cada rótulo <b>estão no estabelecimento agora</b>. O que faltar em relação ao que está em consignação conta como <b>vendido</b>, então não precisa lançar as vendas antes. Use − e + ou digite o número.</p>`
+      : `<p class="small ink2" style="margin-top:0">Conte as garrafas Mil Terras que estão no estabelecimento agora. Já deixamos preenchido o que o sistema espera, a partir das vendas lançadas no app. <b>Se a contagem for diferente do esperado, informe o motivo.</b></p>`;
+    body += `
     ${transito.length ? `<div class="ajuste-box mb">${icon('truck')} Há ${plural(sum(transito, (r) => r.garrafas), 'garrafa')} em reposição ainda não entregue: não conte essas garrafas.</div>` : ''}
     <div class="card pad-0"><div class="list" style="padding:0 14px">${pids.map((pid) => {
       const p = D.produto(s, pid);
@@ -54,12 +58,25 @@ export function renderWizard(s, w, { modo = 'cliente' } = {}) {
       const dif = esperado - w.contagem[pid];
       const falta = dif !== 0 && w.tentou && (w.just[pid] || '').trim().length < 3;
       const vend = (saldo[pid] || 0) - w.contagem[pid];
+      if (gestor) {
+        // Gestão contando por um parceiro que não usa o app: a contagem vale como venda; motivo só se o parceiro lançou vendas
+        return `<div class="li">${thumb(p, 'sm')}<div class="grow"><div class="t">${esc(p.nome)}</div>
+        <div class="s">Em consignação: <b>${saldo[pid] || 0}</b>${reg ? ` · o parceiro lançou ${reg} no app` : ''}</div>
+        <div class="s" style="color:${vend ? 'var(--bordo)' : 'var(--ink-3)'}">${vend ? `Vendidas: <b>${vend}</b> · ${money(vend * D.precoParceiro(s, c, pid))}` : 'Nenhuma vendida'}</div></div>
+        ${reg && dif !== 0 ? `<input class="input just" name="just:${pid}" data-onchange="just" maxlength="200" placeholder="Observação sobre a diferença com o que o parceiro lançou (opcional)" value="${esc(w.just[pid] || '')}">` : ''}</div>
+        ${stepper('cont:' + pid, w.contagem[pid], { max: saldo[pid] || 0 })}</div>`;
+      }
       return `<div class="li">${thumb(p, 'sm')}<div class="grow"><div class="t">${esc(p.nome)}</div>
         <div class="s">Saldo ${saldo[pid]} · lançadas ${reg} · esperado <b>${esperado}</b></div>
         <div class="s" style="color:var(--bordo)">Vendidas: <b>${vend}</b> · ${money(vend * D.precoParceiro(s, c, pid))}${dif > 0 ? ` · <span style="color:var(--warn)">${dif} sem lançamento</span>` : dif < 0 ? ` · <span style="color:var(--crit)">${-dif} a mais que o esperado</span>` : ''}</div></div>
         ${dif !== 0 ? `<input class="input just ${falta ? 'falta' : ''}" name="just:${pid}" data-onchange="just" maxlength="200" placeholder="Motivo da diferença de ${Math.abs(dif)} (${dif > 0 ? 'faltam' : 'sobram'} garrafas) — obrigatório" value="${esc(w.just[pid] || '')}">` : ''}</div>
         ${stepper('cont:' + pid, w.contagem[pid], { max: saldo[pid] || 0 })}</div>`;
     }).join('')}</div></div>`;
+    if (gestor) {
+      const totV = sum(pids, (pid) => (saldo[pid] || 0) - w.contagem[pid]);
+      const totR = sum(pids, (pid) => ((saldo[pid] || 0) - w.contagem[pid]) * D.precoParceiro(s, c, pid));
+      body += `<div class="card mt row between"><div><div class="label">Total vendido no período</div><div class="tiny muted">pela sua contagem</div></div><div class="right"><div class="num" style="font-size:20px">${plural(totV, 'garrafa')}</div><div class="small" style="color:var(--bordo)">${money(totR)}</div></div></div>`;
+    }
   }
   if (w.step === 2) {
     const ls = lotesComVenda(s, w);
@@ -156,7 +173,7 @@ export function wizardHandlers(w, rerender, commit, onDone, modo = 'cliente', to
     'wz-back': () => { w.step--; rerender(); scrollTo(0, 0); },
     'wz-next': () => {
       document.querySelectorAll('input[name^="just:"]').forEach((el) => { w.just[el.name.split(':')[1]] = el.value; });
-      if (w.step === 1) {
+      if (w.step === 1 && modo !== 'gestor') {
         const pend = Object.keys(w.contagem).filter((pid) => w.contagem[pid] !== w.esperado[pid] && (w.just[pid] || '').trim().length < 3);
         if (pend.length) { w.tentou = true; rerender(); document.querySelector('.just.falta')?.focus(); return toastFn?.(`Justifique a diferença de contagem (${pend.length} rótulo${pend.length > 1 ? 's' : ''})`); }
       }
@@ -175,7 +192,11 @@ export function wizardHandlers(w, rerender, commit, onDone, modo = 'cliente', to
     let f;
     commit((s) => {
       const cond = w.forma?.startsWith('cond:') ? w.forma.slice(5) : null;
-      f = D.montarFechamento(s, w.cid, { contagem: w.contagem, reposicao: w.repo || {}, forma: cond ? null : w.forma, condicaoId: cond, obs: w.obs, criadoPor: modo, esperado: w.esperado, justificativas: w.just, lotesSel: w.lotesSel, acertoQtd: w.acertoQtd });
+      // Gestão: a contagem dela vale como venda; só registra "ajuste" onde o parceiro lançou vendas no app
+      const per = D.periodoAtual(s, w.cid);
+      const lancou = new Set(D.vendasCliente(s, w.cid, per.marco).map((v) => v.produtoId));
+      const esperado = modo === 'gestor' ? Object.fromEntries(Object.entries(w.esperado).filter(([pid]) => lancou.has(pid))) : w.esperado;
+      f = D.montarFechamento(s, w.cid, { contagem: w.contagem, reposicao: w.repo || {}, forma: cond ? null : w.forma, condicaoId: cond, obs: w.obs, criadoPor: modo, esperado, justificativas: w.just, lotesSel: w.lotesSel, acertoQtd: w.acertoQtd });
       D.enviarFechamento(s, f);
       const cl = D.cliente(s, w.cid);
       if (cl.filaPedido) { const fila = { ...cl.filaPedido }; for (const r of f.reposicao) delete fila[r.produtoId]; cl.filaPedido = fila; }
