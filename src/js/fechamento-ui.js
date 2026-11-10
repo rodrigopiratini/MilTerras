@@ -10,15 +10,21 @@ export function novoWizard(s, cid) {
   const saldo = D.saldoCliente(s, cid);
   const contagem = {};
   for (const pid of Object.keys(saldo)) if (saldo[pid] > 0) contagem[pid] = est[pid] ?? 0;
-  return { cid, step: 1, contagem, esperado: { ...contagem }, just: {}, repo: null, forma: D.cliente(s, cid).formaPadrao, obs: '', lotesSel: null };
+  return { cid, step: 1, contagem, esperado: { ...contagem }, just: {}, repo: null, forma: D.cliente(s, cid).formaPadrao, obs: '', lotesSel: null, acertoQtd: {} };
 }
 
 // Prévia do fechamento com os lotes escolhidos (valor a pagar = só os lotes selecionados)
 function totais(s, w) {
-  const f = D.montarFechamento(s, w.cid, { contagem: w.contagem, lotesSel: w.lotesSel });
+  const f = D.montarFechamento(s, w.cid, { contagem: w.contagem, lotesSel: w.lotesSel, acertoQtd: w.acertoQtd });
   return { garrafas: f.garrafas, valor: f.total, vendidas: f.vendidas, naoAcertado: f.naoAcertado };
 }
 const lotesComVenda = (s, w) => D.lotes(s, w.cid, { simular: Object.fromEntries(Object.entries(w.contagem).map(([pid, c]) => [pid, Math.max(0, (D.saldoCliente(s, w.cid)[pid] || 0) - c)])) }).filter((l) => l.aberto);
+// Garrafas a acertar de cada rótulo, somando os lotes marcados
+const porRotulo = (ls, sel) => {
+  const r = {};
+  for (const l of ls) if (sel.includes(l.id)) for (const [pid, x] of Object.entries(l.itens)) { const q = x.vendido - x.acertado + x.agora; if (q > 0) r[pid] = (r[pid] || 0) + q; }
+  return r;
+};
 const vencendo = (l) => l.situacao === 'vencido' || l.situacao === 'vencendo';
 
 export function renderWizard(s, w, { modo = 'cliente' } = {}) {
@@ -28,6 +34,7 @@ export function renderWizard(s, w, { modo = 'cliente' } = {}) {
   const est = D.saldoEstimado(s, w.cid);
   const vendas = D.vendasCliente(s, w.cid, per.marco);
   if (!w.lotesSel || w.step === 1) w.lotesSel = w.lotesManual ? w.lotesSel || [] : lotesComVenda(s, w).filter((l) => l.aAcertar > 0).map((l) => l.id);
+  w.acertoQtd ||= {};
   const t = totais(s, w);
   const steps = `<div class="steps">${[1, 2, 3, 4].map((i) => `<i class="${i <= w.step ? 'on' : ''}"></i>`).join('')}</div>`;
   const head = `<div class="row between wrap mb"><div><div class="label">Fechamento · ${date(per.desde)} a ${date(today())}</div>
@@ -68,6 +75,22 @@ export function renderWizard(s, w, { modo = 'cliente' } = {}) {
           <div class="s">Entregue ${date(l.entregueEm)} · ${plural(l.enviado, 'garrafa')} · restam ${l.restante}</div>
           <div class="s" style="color:${l.aAcertar ? 'var(--bordo)' : 'var(--ink-3)'}">${l.aAcertar ? `A acertar: <b>${plural(l.aAcertar, 'garrafa')} · ${money(l.valorPendente)}</b>${l.pendente ? ` (inclui ${l.pendente} de fechamento anterior)` : ''}<br>${itens}` : 'Sem vendas a acertar neste lote'}</div></div></label>`;
       }).join('') || '<div class="empty">Nenhum lote em aberto.</div>'}</div></div>`;
+    const rot = porRotulo(ls, w.lotesSel);
+    const pids = Object.keys(rot);
+    if (pids.length) {
+      const parcial = pids.some((pid) => w.acertoQtd[pid] !== undefined && w.acertoQtd[pid] < rot[pid]);
+      body += `<div class="row between wrap mt"><h3 style="margin:0">Quanto acertar de cada rótulo</h3>${parcial ? `<button type="button" class="chip" data-act="acertoTudo">Acertar tudo</button>` : ''}</div>
+      <p class="small ink2 mt-s">Para um <b>acerto parcial</b>, diminua a quantidade do rótulo. O que ficar de fora continua a acertar e entra no próximo fechamento.</p>
+      <div class="card pad-0"><div class="list" style="padding:0 14px">${pids.map((pid) => {
+        const p = D.produto(s, pid);
+        const q = Math.min(w.acertoQtd[pid] ?? rot[pid], rot[pid]);
+        const pr = D.precoParceiro(s, c, pid);
+        return `<div class="li">${thumb(p, 'sm')}<div class="grow"><div class="t">${esc(p.nome)}</div>
+          <div class="s">${plural(rot[pid], 'garrafa')} a acertar · ${money(pr)} cada</div>
+          <div class="s" style="color:var(--bordo)">Agora: <b>${q}</b> · ${money(q * pr)}${q < rot[pid] ? ` · <span style="color:var(--warn)">${rot[pid] - q} fica${rot[pid] - q > 1 ? 'm' : ''} para depois</span>` : ''}</div></div>
+          ${stepper('acerto:' + pid, q, { max: rot[pid] })}</div>`;
+      }).join('')}</div></div>`;
+    }
   }
   if (w.step === 3) {
     const disp = modo === 'gestor' ? D.estoqueCentral(s) : D.estoqueDisponivel(s);
@@ -124,7 +147,8 @@ export function wizardHandlers(w, rerender, commit, onDone, modo = 'cliente', to
     step: (el) => { const inp = el.parentElement.querySelector('input'); inp.value = Math.max(0, Math.min(inp.max === '' ? 999 : +inp.max, (+inp.value || 0) + +el.dataset.d)); read(inp); },
     just: (el) => { w.just[el.name.split(':')[1]] = el.value; },
     lote: (el) => { w.lotesManual = true; const id = el.dataset.id; w.lotesSel = el.checked ? [...new Set([...w.lotesSel, id])] : w.lotesSel.filter((x) => x !== id); setTimeout(rerender); },
-    lotesTodos: () => { w.lotesManual = false; w.lotesSel = null; rerender(); },
+    lotesTodos: () => { w.lotesManual = false; w.lotesSel = null; w.acertoQtd = {}; rerender(); },
+    acertoTudo: () => { w.acertoQtd = {}; rerender(); },
     lotesVencendo: () => { w.lotesManual = true; w.lotesSel = lotesComVenda(currentS(), w).filter((l) => l.aAcertar > 0 && vencendo(l)).map((l) => l.id); rerender(); },
     qty: (el) => read(el),
     obs: (el) => { w.obs = el.value; },
@@ -144,14 +168,14 @@ export function wizardHandlers(w, rerender, commit, onDone, modo = 'cliente', to
   function read(inp) {
     const [k, pid] = inp.name.split(':');
     const v = Math.max(0, Math.min(inp.max === '' ? 999 : +inp.max, +inp.value || 0));
-    if (k === 'cont') { w.contagem[pid] = v; w.repo = null; } else w.repo[pid] = v;
+    if (k === 'cont') { w.contagem[pid] = v; w.repo = null; w.acertoQtd = {}; } else if (k === 'acerto') w.acertoQtd[pid] = v; else w.repo[pid] = v;
     setTimeout(rerender); // fora do evento de blur/change
   }
   function finish(aprovar) {
     let f;
     commit((s) => {
       const cond = w.forma?.startsWith('cond:') ? w.forma.slice(5) : null;
-      f = D.montarFechamento(s, w.cid, { contagem: w.contagem, reposicao: w.repo || {}, forma: cond ? null : w.forma, condicaoId: cond, obs: w.obs, criadoPor: modo, esperado: w.esperado, justificativas: w.just, lotesSel: w.lotesSel });
+      f = D.montarFechamento(s, w.cid, { contagem: w.contagem, reposicao: w.repo || {}, forma: cond ? null : w.forma, condicaoId: cond, obs: w.obs, criadoPor: modo, esperado: w.esperado, justificativas: w.just, lotesSel: w.lotesSel, acertoQtd: w.acertoQtd });
       D.enviarFechamento(s, f);
       const cl = D.cliente(s, w.cid);
       if (cl.filaPedido) { const fila = { ...cl.filaPedido }; for (const r of f.reposicao) delete fila[r.produtoId]; cl.filaPedido = fila; }

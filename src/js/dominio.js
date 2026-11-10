@@ -348,7 +348,7 @@ export function sugestaoReposicao(s, cid, contagem) {
   return out;
 }
 
-export function montarFechamento(s, cid, { contagem, reposicao = {}, forma, condicaoId, obs = '', criadoPor = 'cliente', data = today(), esperado = {}, justificativas = {}, lotesSel }) {
+export function montarFechamento(s, cid, { contagem, reposicao = {}, forma, condicaoId, obs = '', criadoPor = 'cliente', data = today(), esperado = {}, justificativas = {}, lotesSel, acertoQtd }) {
   const c = cliente(s, cid);
   const per = periodoAtual(s, cid);
   const saldo = saldoCliente(s, cid);
@@ -375,14 +375,17 @@ export function montarFechamento(s, cid, { contagem, reposicao = {}, forma, cond
   const ls = lotes(s, cid, { simular: Object.fromEntries(itens.map((i) => [i.produtoId, i.vendido])) }).filter((l) => l.aAcertar > 0);
   const sel = new Set(lotesSel || ls.map((l) => l.id));
   const acertos = [];
+  // acerto parcial por rótulo: acertoQtd[pid] = quantas garrafas acertar agora (das mais antigas para as mais novas)
+  const cota = { ...(acertoQtd || {}) };
   for (const l of ls) {
     if (!sel.has(l.id)) continue;
     for (const [pid, x] of Object.entries(l.itens)) {
-      const q = x.vendido - x.acertado + x.agora;
+      let q = x.vendido - x.acertado + x.agora;
+      if (cota[pid] !== undefined) { q = Math.max(0, Math.min(q, cota[pid])); cota[pid] -= q; }
       if (q > 0) { const pr = precoParceiro(s, c, pid, data); acertos.push({ loteId: l.id, protocolo: l.protocolo, produtoId: pid, qtd: q, preco: pr, valor: q * pr }); }
     }
   }
-  const naoAcertado = sum(ls.filter((l) => !sel.has(l.id)), (l) => l.aAcertar);
+  const naoAcertado = sum(ls, (l) => l.aAcertar) - sum(acertos, (a) => a.qtd);
   const cond = condicao(c, condicaoId ?? (!forma && c.formaPadrao?.startsWith('cond:') ? c.formaPadrao.slice(5) : null));
   return {
     id: uid('fc'), numero: `FEC-${c.codigo}-${String(s.fechamentos.filter((f) => f.clienteId === cid).length + 1).padStart(3, '0')}`,
