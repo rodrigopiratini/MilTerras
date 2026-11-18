@@ -159,11 +159,41 @@ export function migrarProtocolos(s) {
     for (const m of ms) m.protocolo = prot;
     mudou = true;
   }
+  // protocolo repetido (duas remessas criadas em aparelhos desatualizados): a mais nova ganha número novo
+  const porProt = {};
+  for (const m of s.movs) if (m.tipo === 'remessa' && m.remessaId && m.protocolo) ((porProt[m.protocolo] ||= {})[m.remessaId] ||= m.ts || 0);
+  for (const [prot, ids] of Object.entries(porProt)) {
+    const rids = Object.keys(ids).sort((a, b) => ids[a] - ids[b]);
+    for (const rid of rids.slice(1)) {
+      const novo = proximoProtocolo(s, prot.slice(4, 8) || today().slice(0, 4));
+      for (const m of s.movs) if (m.remessaId === rid) m.protocolo = novo;
+      for (const f of s.fechamentos) for (const a of f.acertos || []) if (a.loteId === rid) a.protocolo = novo;
+      mudou = true;
+    }
+  }
+  // número dos fechamentos: falta, "undefined" (parceiro sem código) ou repetido → renumera o parceiro em ordem
   for (const c of s.clientes) {
     const fs = s.fechamentos.filter((f) => f.clienteId === c.id).sort((a, b) => (a.fim + (a.ts || '') < b.fim + (b.ts || '') ? -1 : 1));
-    fs.forEach((f, i) => { if (!f.numero) { f.numero = `FEC-${c.codigo}-${String(i + 1).padStart(3, '0')}`; mudou = true; } });
+    const nums = fs.map((f) => f.numero);
+    if (nums.some((n, i) => !n || n.includes('undefined') || nums.indexOf(n) !== i)) {
+      fs.forEach((f, i) => { const n = `FEC-${siglaCliente(c)}-${String(i + 1).padStart(3, '0')}`; if (f.numero !== n) { f.numero = n; mudou = true; } });
+    }
   }
   return mudou;
+}
+
+// Sigla do parceiro no número do fechamento: o código do cadastro ou as iniciais do nome (TASSIA BOROCHEDES SOMMELIER LTDA → TBS)
+const NAO_SIGLA = new Set(['LTDA', 'ME', 'EPP', 'EIRELI', 'SA', 'DA', 'DE', 'DO', 'DAS', 'DOS', 'E']);
+export function siglaCliente(c) {
+  if (c?.codigo) return c.codigo;
+  const ps = String(c?.nome || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().split(/[^A-Z0-9]+/).filter((w) => w && !NAO_SIGLA.has(w));
+  return ps.slice(0, 4).map((w) => w[0]).join('') || 'PARC';
+}
+// Próximo número de fechamento do parceiro (maior número já usado + 1, não a contagem)
+export function numeroFechamento(s, c) {
+  let max = 0;
+  for (const f of s.fechamentos) if (f.clienteId === c.id) { const x = /-(\d+)$/.exec(f.numero || ''); if (x) max = Math.max(max, +x[1]); }
+  return `FEC-${siglaCliente(c)}-${String(max + 1).padStart(3, '0')}`;
 }
 
 // ---------- Lotes (cada remessa entregue é um lote com vencimento próprio) ----------
@@ -402,7 +432,7 @@ export function montarFechamento(s, cid, { contagem, reposicao = {}, forma, cond
   const naoAcertado = sum(ls, (l) => l.aAcertar) - sum(acertos, (a) => a.qtd);
   const cond = condicao(c, condicaoId ?? (!forma && c.formaPadrao?.startsWith('cond:') ? c.formaPadrao.slice(5) : null));
   return {
-    id: uid('fc'), numero: `FEC-${c.codigo}-${String(s.fechamentos.filter((f) => f.clienteId === cid).length + 1).padStart(3, '0')}`,
+    id: uid('fc'), numero: numeroFechamento(s, c),
     clienteId: cid, inicio: per.inicio, fim: data, status: 'enviado', criadoPor,
     itens, acertos, lotesSel: [...sel].filter((id) => ls.some((l) => l.id === id)), naoAcertado,
     vendidas: sum(itens, (i) => i.vendido), total: sum(acertos, (a) => a.valor), garrafas: sum(acertos, (a) => a.qtd),
