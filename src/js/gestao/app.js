@@ -269,8 +269,8 @@ function vEstoque({ query }) {
     <div class="tiny muted mt-s">Cobertura = saldo ÷ giro médio dos últimos 60 dias (vendas apuradas + vendas diretas). Alerta abaixo de 45 dias, tempo médio de uma importação.</div>
     <h2 class="mt">Movimentações recentes</h2>
     <div class="card pad-0 mt-s"><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Data</th><th>Tipo</th><th>Rótulo</th><th class="hide-m">Parceiro / obs.</th><th class="r">Qtd.</th></tr></thead>
-      <tbody>${movs.map((m) => { const f = D.TIPOS_MOV[m.tipo].central; return `<tr data-busca="${esc(D.produto(s, m.produtoId).nome + ' ' + (m.clienteId ? D.cliente(s, m.clienteId)?.nome : '') + ' ' + (m.obs || '') + ' ' + D.TIPOS_MOV[m.tipo].label)}"><td>${dateShort(m.data)}</td><td>${badge(D.TIPOS_MOV[m.tipo].label.split(' (')[0], m.tipo === 'entrada' ? 'ok' : m.tipo === 'remessa' ? 'info' : m.tipo === 'perda' ? 'crit' : '')}</td>
-        <td>${esc(D.produto(s, m.produtoId).nome)}</td><td class="hide-m small muted">${esc(m.clienteId ? D.cliente(s, m.clienteId).nome : m.obs || '')}</td><td class="r"><b class="${f * Math.sign(m.qtd) > 0 ? 'up' : 'down'}">${f * m.qtd > 0 ? '+' : ''}${f * m.qtd}</b></td></tr>`; }).join('')}</tbody></table></div></div>
+      <tbody>${movs.map((m) => { const f = D.TIPOS_MOV[m.tipo].central; return `<tr data-busca="${esc(D.produto(s, m.produtoId).nome + ' ' + (m.clienteId ? D.cliente(s, m.clienteId)?.nome : '') + ' ' + (m.obs || '') + ' ' + (m.comprador || '') + ' ' + D.TIPOS_MOV[m.tipo].label)}"><td>${dateShort(m.data)}</td><td>${badge(D.TIPOS_MOV[m.tipo].label.split(' (')[0], m.tipo === 'entrada' ? 'ok' : m.tipo === 'remessa' ? 'info' : m.tipo === 'perda' ? 'crit' : '')}</td>
+        <td>${esc(D.produto(s, m.produtoId).nome)}</td><td class="hide-m small muted">${esc(m.clienteId ? D.cliente(s, m.clienteId).nome : [m.comprador, m.forma, m.obs].filter(Boolean).join(' · '))}</td><td class="r"><b class="${f * Math.sign(m.qtd) > 0 ? 'up' : 'down'}">${f * m.qtd > 0 ? '+' : ''}${f * m.qtd}</b></td></tr>`; }).join('')}</tbody></table></div></div>
   `);
 }
 
@@ -282,9 +282,12 @@ function modalMov(tipo, snap = {}, onSalvo) {
     <form id="fmov" class="col">
       <div class="grid g2"><label class="field"><span>Data</span><input class="input" type="date" name="data" value="${today()}"></label>
       <label class="field"><span>${tipo === 'entrada' ? 'Documento / importação' : 'Observação'}</span><input class="input" name="obs" placeholder="${tipo === 'entrada' ? 'Ex.: Importação Dieci Terre #3' : ''}"></label></div>
+      ${tipo === 'venda_direta' ? `<div class="grid g2"><label class="field"><span>Comprador</span><input class="input" name="comprador" maxlength="120" placeholder="Quem comprou (pessoa ou empresa)"></label>
+      <label class="field"><span>Forma de pagamento</span><select class="input" name="forma"><option value="">—</option>${D.FORMAS_PAGAMENTO.map((f) => `<option>${esc(f)}</option>`).join('')}</select></label></div>
+      <label class="field"><span>Contato / documento (opcional)</span><input class="input" name="contato" maxlength="120" placeholder="Telefone, e-mail, CPF/CNPJ, nota fiscal…"></label>` : ''}
       ${tipo === 'ajuste' ? `<div class="seg"><button type="button" class="on" data-act="sinal" data-v="1">Adicionar</button><button type="button" data-act="sinal" data-v="-1">Remover</button></div><input type="hidden" name="sinal" value="1">` : ''}
       ${tipo === 'entrada' ? `<div class="row between"><span class="small muted">Informe a quantidade de cada rótulo recebido.</span><button type="button" class="btn ghost sm" data-act="novoRotuloMov">${icon('plus')} Cadastrar novo rótulo</button></div>` : ''}
-      <div class="card pad-0"><div class="list" style="padding:0 14px">${s.produtos.filter((p) => p.ativo).map((p) => `<div class="li">${thumb(p, 'sm')}<div class="grow"><div class="t">${esc(p.nome)}</div><div class="s">Saldo ${est[p.id]}${tipo === 'entrada' ? '' : tipo === 'venda_direta' ? ` · tabela ${money(p.preco)}` : ''}</div></div>
+      <div class="card pad-0"><div class="list" style="padding:0 14px">${s.produtos.filter((p) => p.ativo).map((p) => `<div class="li li-mov">${thumb(p, 'sm')}<div class="grow"><div class="t">${esc(p.nome)}</div><div class="s">Saldo ${est[p.id]}${tipo === 'entrada' ? '' : tipo === 'venda_direta' ? ` · tabela ${money(p.preco)}` : ''}</div></div>
         ${tipo === 'entrada' ? moneyInput('custo:' + p.id, D.custoDe(s, p.id), { width: 120, extra: 'title="Custo unitário"' }) : ''}
         ${tipo === 'venda_direta' ? moneyInput('preco:' + p.id, p.preco * 1.25, { width: 120, extra: 'title="Preço unitário"' }) : ''}
         ${stepper('q:' + p.id, 0, tipo === 'entrada' ? {} : { max: tipo === 'ajuste' ? 9999 : Math.max(0, est[p.id]) })}</div>`).join('')}</div></div>
@@ -301,6 +304,7 @@ function modalMov(tipo, snap = {}, onSalvo) {
         const itens = s.produtos.map((p) => ({ p, q: +fd.get('q:' + p.id) || 0 })).filter((x) => x.q > 0);
         if (!itens.length) return toast('Informe ao menos uma quantidade');
         const data = fd.get('data'), obs = fd.get('obs');
+        const extra = tipo === 'venda_direta' ? Object.fromEntries(['comprador', 'forma', 'contato'].map((k) => [k, String(fd.get(k) || '').trim()]).filter(([, v]) => v)) : {};
         const saida = tipo === 'venda_direta' || tipo === 'perda' || (tipo === 'ajuste' && +fd.get('sinal') < 0);
         const falta = saida && itens.find((x) => x.q > est[x.p.id]);
         if (falta) return toast(`${falta.p.nome}: só há ${Math.max(0, est[falta.p.id])} no estoque central`);
@@ -309,7 +313,7 @@ function modalMov(tipo, snap = {}, onSalvo) {
         store.commit((st) => {
           for (const { p, q } of itens) {
             if (tipo === 'entrada') { const cu = parseMoney(fd.get('custo:' + p.id)) || D.custoDe(st, p.id); total += cu * q; D.addMov(st, { data, tipo, produtoId: p.id, qtd: q, custoUnit: cu, obs }); }
-            else if (tipo === 'venda_direta') { const pu = parseMoney(fd.get('preco:' + p.id)); total += pu * q; D.addMov(st, { data, tipo, produtoId: p.id, qtd: q, precoUnit: pu, obs }); }
+            else if (tipo === 'venda_direta') { const pu = parseMoney(fd.get('preco:' + p.id)); total += pu * q; D.addMov(st, { data, tipo, produtoId: p.id, qtd: q, precoUnit: pu, obs, ...extra }); }
             else if (tipo === 'ajuste') D.addMov(st, { data, tipo, produtoId: p.id, qtd: q * +fd.get('sinal'), obs: obs || 'Ajuste de inventário' });
             else D.addMov(st, { data, tipo, produtoId: p.id, qtd: q, obs });
           }

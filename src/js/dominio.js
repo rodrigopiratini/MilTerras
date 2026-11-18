@@ -553,7 +553,7 @@ export function balancoMes(s, mes) {
   const despesas = s.despesas.filter((d) => d.data.startsWith(mes));
   const recebimentos = [
     ...s.fechamentos.flatMap((f) => recebimentosDe(f).filter((p) => (p.data || '').startsWith(mes)).map((p) => ({ data: p.data, descricao: `Fechamento ${cliente(s, f.clienteId)?.nome || ''}`, forma: p.forma + (p.parcelas > 1 ? ` em ${p.parcelas}x` : ''), valor: p.valor, link: `#/fechamento/${f.id}` }))),
-    ...s.movs.filter((m) => m.tipo === 'venda_direta' && m.data.startsWith(mes)).map((m) => ({ data: m.data, descricao: `Venda direta · ${m.qtd}× ${produto(s, m.produtoId)?.nome}`, forma: '', valor: m.qtd * (m.precoUnit || 0) })),
+    ...s.movs.filter((m) => m.tipo === 'venda_direta' && m.data.startsWith(mes)).map((m) => ({ data: m.data, descricao: `Venda direta${m.comprador ? ' · ' + m.comprador : ''} · ${m.qtd}× ${produto(s, m.produtoId)?.nome}`, forma: m.forma || '', valor: m.qtd * (m.precoUnit || 0) })),
   ].sort((a, b) => (a.data < b.data ? -1 : 1));
   const receita = sum(vendas, (v) => v.receita), cmv = sum(vendas, (v) => v.cmv);
   const compras = sum(despesas.filter((d) => d.categoria === 'Compra de mercadoria'), (d) => d.valor);

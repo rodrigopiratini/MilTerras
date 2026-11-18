@@ -318,7 +318,8 @@ function vPedido({ query }) {
     ${meus.length ? `<h2 class="mt">Meus pedidos</h2><div class="card pad-0 mt-s"><div class="list" style="padding:0 16px">${meus.map((p) => { const r = p.remessaId && D.remessas(s).find((x) => x.id === p.remessaId); return `<div class="li"><div class="grow"><div class="t">${date(p.data)} · ${plural(sum(p.itens, (i) => i.qtd), 'garrafa')} · ${money(D.valorItens(s, p.itens))}</div>
       <div class="s">${p.itens.map((i) => `${i.qtd}× ${esc(D.produto(s, i.produtoId)?.nome)}`).join(', ')}</div>${p.motivo ? `<div class="s" style="color:var(--crit)">${esc(p.motivo)}</div>` : ''}</div>
       ${r ? badge(D.STATUS_ENTREGA[r.status].label, D.STATUS_ENTREGA[r.status].tone) : badge(D.STATUS_PEDIDO[p.status].label, D.STATUS_PEDIDO[p.status].tone)}
-      ${p.status === 'solicitado' ? `<button class="iconbtn" data-act="cancelarPedido" data-id="${p.id}" aria-label="Cancelar">${icon('trash')}</button>` : ''}</div>`; }).join('')}</div></div>` : ''}`, { back: true });
+      ${p.status === 'solicitado' ? `<button class="btn ghost sm" data-act="cancelarPedido" data-id="${p.id}">${icon('x')} Cancelar</button>` : ''}</div>
+      ${p.status === 'aprovado' && r && r.status !== 'entregue' ? `<div class="tiny muted" style="margin:-6px 0 10px">Já aprovado pela Mil Terras. Para cancelar, fale com a Mil Terras.</div>` : ''}`; }).join('')}</div></div>` : ''}`, { back: true });
 }
 
 
@@ -370,7 +371,7 @@ const acoes = {
     toast('Pedido enviado para a Mil Terras');
     if (location.hash.includes('?')) location.hash = '#/pedido'; else rerender();
   },
-  cancelarPedido: (el) => confirmar('Cancelar este pedido?', { ok: 'Cancelar pedido' }).then((y) => y && store.commit((st) => { st.pedidos = st.pedidos.filter((p) => p.id !== el.dataset.id); })),
+  cancelarPedido: (el) => confirmar('Cancelar este pedido? As garrafas voltam a ficar disponíveis e a Mil Terras não vai mais enviá-lo.', { ok: 'Cancelar pedido', titulo: 'Cancelar pedido' }).then((y) => y && store.commit((st) => { st.pedidos = st.pedidos.filter((p) => p.id !== el.dataset.id); })),
 };
 
 // No modo visualização (Gestão vendo o app do parceiro) as ações que gravam ficam bloqueadas
