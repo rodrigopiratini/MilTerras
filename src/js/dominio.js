@@ -130,6 +130,20 @@ export function avancarRemessa(s, remessaId, status, { recebidoPor, data = today
   }
 }
 
+// Cancela uma remessa ainda não entregue (o parceiro desistiu ou não coletou): as garrafas voltam
+// para o estoque central e a remessa some do quadro. O pedido / fechamento de origem guarda o registro.
+export function cancelarRemessa(s, remessaId, motivo = '') {
+  const r = remessas(s).find((x) => x.id === remessaId);
+  if (!r || r.status === 'entregue') return null;
+  s.movs = s.movs.filter((m) => m.remessaId !== remessaId);
+  const reg = { remessaId, protocolo: r.protocolo, itens: r.itens.map(({ produtoId, qtd }) => ({ produtoId, qtd })), motivo, em: today() };
+  const p = pedidos(s).find((x) => x.remessaId === remessaId);
+  if (p) Object.assign(p, { status: 'cancelado', motivo, canceladoEm: reg.em, remessaId: null, remessaCancelada: reg });
+  const f = s.fechamentos.find((x) => x.remessaId === remessaId);
+  if (f) Object.assign(f, { remessaId: null, reposicaoEnviada: [], remessaCancelada: reg });
+  return r;
+}
+
 // Dá protocolo às remessas antigas (agrupa por parceiro + data) e número aos fechamentos sem número.
 // Roda na Gestão; devolve true se alterou algo.
 export function migrarProtocolos(s) {
@@ -250,7 +264,7 @@ export function emTransito(s) {
 }
 
 // ---------- Pedidos de reposição (parceiro, entre fechamentos) ----------
-export const STATUS_PEDIDO = { solicitado: { label: 'Solicitado', tone: 'warn' }, aprovado: { label: 'Aprovado', tone: 'ok' }, recusado: { label: 'Recusado', tone: 'crit' } };
+export const STATUS_PEDIDO = { solicitado: { label: 'Solicitado', tone: 'warn' }, aprovado: { label: 'Aprovado', tone: 'ok' }, recusado: { label: 'Recusado', tone: 'crit' }, cancelado: { label: 'Cancelado', tone: '' } };
 export const pedidos = (s) => s.pedidos || [];
 export const valorItens = (s, itens, c) => sum(itens, (i) => i.qtd * (c ? precoParceiro(s, c, i.produtoId) : produto(s, i.produtoId)?.preco || 0));
 

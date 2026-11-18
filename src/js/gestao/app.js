@@ -410,6 +410,7 @@ function vRemessas({ query }) {
         ${st.prox ? `<button class="btn sm" data-act="avancarRem" data-id="${r.id}" data-st="${st.prox}">${st.acao}</button>` : ''}
         <a class="btn ghost sm" href="#/imprimir/romaneio/${r.clienteId}?r=${r.id}" title="Romaneio">${icon('print')}</a>
         ${r.status === 'em_rota' || r.status === 'separado' ? `<a class="btn ghost sm" target="_blank" rel="noopener" href="${waLink(c?.telefone, `Olá ${(c?.contato || '').split(' ')[0]}! Sua reposição Mil Terras (${r.garrafas} garrafas) ${r.status === 'em_rota' ? 'saiu para entrega' : 'está separada e sai em breve'}. 🍷`)}" title="Avisar no WhatsApp">${icon('whatsapp')}</a>` : ''}
+        ${r.status !== 'entregue' ? `<button class="btn ghost sm" data-act="cancelarRem" data-id="${r.id}" title="Cancelar remessa">${icon('x')}</button>` : ''}
         ${r.status !== 'entregue' && r.status !== 'a_separar' ? `<button class="btn ghost sm" data-act="voltarRem" data-id="${r.id}" data-st="${cols[cols.indexOf(r.status) - 1]}" title="Voltar etapa">${icon('arrowL')}</button>` : ''}
       </div></div>`;
   };
@@ -634,6 +635,7 @@ function vFechamento({ id }) {
         <tbody>${f.itens.map((i) => { const d = i.vendido - i.registrado; const aj = i.esperado !== undefined && i.contagem !== i.esperado; return `<tr><td>${esc(D.produto(s, i.produtoId).nome)}${aj ? `<div class="tiny" style="color:var(--warn)">contagem ajustada (ver justificativa)</div>` : ''}${d > 0 ? `<div class="tiny" style="color:var(--warn)">${d} sem lançamento no app</div>` : d < 0 ? `<div class="tiny" style="color:var(--crit)">${-d} lançadas a mais que o contado</div>` : ''}</td><td class="r">${i.saldoAnterior}</td><td class="r">${i.esperado ?? '—'}</td><td class="r" style="${aj ? 'color:var(--warn);font-weight:700' : ''}">${i.contagem}</td><td class="r"><b>${i.vendido}</b></td><td class="r">${money(i.valor)}</td></tr>`; }).join('')}</tbody>
         <tfoot><tr><td colspan="4">Total</td><td class="r">${f.garrafas}</td><td class="r">${money(f.total)}</td></tr></tfoot></table></div></div>
       <div class="card pad-0"><div style="padding:16px 16px 0"><h2>Reposição ${f.status === 'enviado' ? 'solicitada' : 'enviada'}</h2></div>
+        ${f.remessaCancelada ? `<div class="tiny" style="padding:8px 16px 0;color:var(--warn)">Remessa ${esc(f.remessaCancelada.protocolo || '')} cancelada em ${date(f.remessaCancelada.em)} (${plural(sum(f.remessaCancelada.itens, (i) => i.qtd), 'garrafa')})${f.remessaCancelada.motivo ? ': ' + esc(f.remessaCancelada.motivo) : ''}</div>` : ''}
         ${repo.length ? `<form id="frepo"><div class="list" style="padding:0 16px">${repo.map((r) => { const p = D.produto(s, r.produtoId); const novo = !f.itens.some((i) => i.produtoId === r.produtoId); return `<div class="li">${thumb(p, 'sm')}<div class="grow"><div class="t">${esc(p.nome)} ${novo ? badge('Novo rótulo', 'opp') : ''}</div><div class="s">Central: ${est[p.id]}${f.status === 'enviado' && est[p.id] < r.qtd ? ' · <span style="color:var(--crit)">insuficiente</span>' : ''}</div></div>${f.status === 'enviado' ? stepper('r:' + p.id, Math.min(r.qtd, Math.max(0, est[p.id])), { max: Math.max(0, est[p.id]) }) : `<b>${r.qtd}</b>`}</div>`; }).join('')}</div></form>` : `<div style="padding:16px">${empty('Sem reposição', 'truck')}</div>`}</div>
     </div>`, { back: true });
 }
@@ -1195,6 +1197,18 @@ const acoes = {
       handlers: { ok: () => { const fd = new FormData(document.getElementById('fent')); store.commit((s2) => D.avancarRemessa(s2, el.dataset.id, 'entregue', { data: fd.get('data'), recebidoPor: String(fd.get('quem') || '').trim() })); closeModal(); toast('Entrega confirmada — saldo do parceiro atualizado'); } } });
     store.commit((s2) => D.avancarRemessa(s2, el.dataset.id, st));
     toast(`Remessa: ${D.STATUS_ENTREGA[st].label}`);
+  },
+  cancelarRem: (el) => {
+    const s = S();
+    const r = D.remessas(s).find((x) => x.id === el.dataset.id);
+    if (!r) return;
+    const c = D.cliente(s, r.clienteId);
+    modal({ title: `Cancelar remessa ${esc(r.protocolo || '')}`,
+      body: `<p class="small ink2" style="margin-top:0"><b>${esc(c?.nome || '—')}</b> · ${plural(r.garrafas, 'garrafa')} · ${money(r.valor)}<br>${r.itens.map((i) => `${i.qtd}× ${esc(D.produto(s, i.produtoId)?.nome)}`).join(' · ')}</p>
+        <p class="small">As garrafas <b>voltam para o estoque central</b> e a remessa sai do quadro. Nada muda no saldo do parceiro (ela ainda não tinha sido entregue).</p>
+        <form id="fcanc"><label class="field"><span>Motivo (opcional)</span><input class="input" name="motivo" maxlength="200" placeholder="Ex.: parceiro desistiu / não coletou"></label></form>`,
+      foot: '<button class="btn ghost" data-act="close">Voltar</button><button class="btn" style="background:var(--crit)" data-act="ok">Cancelar remessa</button>',
+      handlers: { ok: () => { const m = String(new FormData(document.getElementById('fcanc')).get('motivo') || '').trim(); store.commit((s2) => D.cancelarRemessa(s2, r.id, m), 'remessa'); closeModal(); toast('Remessa cancelada — garrafas de volta ao estoque central'); } } });
   },
   voltarRem: (el) => { store.commit((s2) => D.avancarRemessa(s2, el.dataset.id, el.dataset.st)); toast(`Remessa voltou para: ${D.STATUS_ENTREGA[el.dataset.st].label}`); },
 };
