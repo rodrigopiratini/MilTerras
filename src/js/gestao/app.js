@@ -7,7 +7,7 @@ import { money, money0, moneyK, int, percent, date, dateShort, relDays, today, a
 import { icon, modal, closeModal, confirmar, toast, kpi, badge, empty, stepper, stepHandler, insightCard, iniciais, waLink, download, toCSV, asset, moneyInput, parseMoney } from '../core/ui.js';
 import { thumb, fichaVinho, qtdBadge } from '../vinhos-ui.js';
 import { chart, legend, hbars } from '../core/charts.js';
-import { novoWizard, renderWizard, wizardHandlers, statusBadge, ajustesHTML, acertosHTML } from '../fechamento-ui.js';
+import { novoWizard, wizardDe, semFechamento, renderWizard, wizardHandlers, statusBadge, ajustesHTML, acertosHTML } from '../fechamento-ui.js';
 import { extrasGestao } from '../ia-extras.js';
 
 const S = () => store.get();
@@ -619,7 +619,7 @@ function vFechamento({ id }) {
     <div class="pagehead"><div><div class="label">${esc(c.nome)}</div><h1 style="margin-top:4px">${f.numero ? esc(f.numero) + ' · ' : ''}Fechamento ${date(f.inicio)} – ${date(f.fim)}</h1>
       <div class="sub row gap-s wrap">${statusBadge(f)} <span>Feito por ${f.criadoPor === 'cliente' ? 'parceiro, pelo app' : 'Mil Terras'}</span>${f.aprovadoEm ? `<span>· conferido ${date(f.aprovadoEm)}</span>` : ''}${f.pagoEm ? `<span>· pago ${date(f.pagoEm)}</span>` : ''}</div></div>
       <div class="row wrap"><a class="btn ghost" href="#/imprimir/fechamento/${f.id}">${icon('print')} Relatório</a><a class="btn ghost" target="_blank" rel="noopener" href="${waLink(c.telefone, txt)}">${icon('whatsapp')} Enviar</a>
-      ${f.status === 'enviado' ? `<button class="btn ok" data-act="aprovar" data-id="${f.id}">${icon('check')} Conferir e aprovar</button>` : ''}
+      ${f.status === 'enviado' ? `<a class="btn ghost" href="#/editar-fechamento/${f.id}">${icon('edit')} Editar</a><button class="btn ok" data-act="aprovar" data-id="${f.id}">${icon('check')} Conferir e aprovar</button>` : ''}
       ${f.status === 'aprovado' ? `<button class="btn ok" data-act="pagar" data-id="${f.id}">${icon('money')} Registrar pagamento</button>` : ''}</div></div>
     <div class="grid g4">${kpi('A pagar', money(f.total), f.pagamentos?.length && f.status === 'aprovado' ? `<b>${money(D.saldoAberto(f))} em aberto</b> · ${money(D.recebido(f))} recebido` : `${f.garrafas} garrafas acertadas${f.naoAcertado ? ` · ${f.naoAcertado} para depois` : ''}`)}
       <div class="card kpi"><div class="label">Forma de pagamento</div>${f.status === 'pago' ? `<div class="v">${esc(f.formaPagamento || '—')}</div>` : `<select class="input" data-onchange="formaFech" data-id="${f.id}" style="font-weight:600">${opcoesForma(c, f)}</select>`}<div class="d">${f.vencimento ? `vence ${date(f.vencimento)}` : `prazo ${c.prazoDias} dias após aprovação`}</div></div>
@@ -662,6 +662,24 @@ function vNovoFechamento({ cid }) {
   return shell('Fechamento', `<div class="label">${esc(c.nome)}</div><div style="max-width:760px">${renderWizard(s, wz, { modo: 'gestor' })}</div>`, { back: true });
 }
 let wz = null;
+
+// Corrigir um fechamento enviado (ainda não aprovado): o mesmo assistente, já preenchido
+function vEditarFechamento({ id }) {
+  const real = S();
+  const f = real.fechamentos.find((x) => x.id === id);
+  if (!f) return shell('Fechamento', empty('Fechamento não encontrado'), { back: true });
+  if (f.status !== 'enviado') return shell('Fechamento', `<div class="card">${empty(`Este fechamento já foi conferido e não pode mais ser editado.<br><a href="#/fechamento/${f.id}">Abrir fechamento</a>`, 'receipt')}</div>`, { back: true });
+  const s = semFechamento(real, id);
+  if (!wz || wz.editId !== id) wz = wizardDe(s, f);
+  const c = D.cliente(s, f.clienteId);
+  handlers = wizardHandlers(wz, rerender, store.commit, (nf, aprovado) => {
+    wz = null;
+    toast(aprovado ? `Fechamento aprovado: ${money(nf.total)}` : 'Alterações salvas');
+    if (nf.avisos?.length) setTimeout(() => toast(nf.avisos[0]), 2900);
+    location.hash = `#/fechamento/${nf.id}`;
+  }, 'gestor', toast, () => semFechamento(S(), id));
+  return shell('Editar fechamento', `<div class="label">${esc(c.nome)} · editando ${esc(f.numero || 'fechamento')}${f.criadoPor === 'cliente' ? ' (enviado pelo parceiro)' : ''}</div><div style="max-width:760px">${renderWizard(s, wz, { modo: 'gestor' })}</div>`, { back: true });
+}
 
 // ---------- Financeiro ----------
 const nomeMes = (k) => { const [y, m] = k.split('-').map(Number); const t = new Date(y, m - 1, 1).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }); return t[0].toUpperCase() + t.slice(1); };
@@ -1207,11 +1225,11 @@ const A = criarApp({
     const remPend = D.remessas(s).filter((r) => r.status !== 'entregue').length + D.pedidos(s).filter((p) => p.status === 'solicitado').length;
     return { '#/fechamentos': pend, '#/remessas': remPend };
   },
-  ativo: (h, route) => (h === '#/parceiros' && route.startsWith('#/parceiro')) || (h === '#/fechamentos' && (route.startsWith('#/fechamento') || route.startsWith('#/novo-fechamento'))) || (h === '#/produtos' && route.startsWith('#/produto')),
+  ativo: (h, route) => (h === '#/parceiros' && route.startsWith('#/parceiro')) || (h === '#/fechamentos' && (route.startsWith('#/fechamento') || route.startsWith('#/novo-fechamento') || route.startsWith('#/editar-fechamento'))) || (h === '#/produtos' && route.startsWith('#/produto')),
   topoDireita: (s) => { const pend = s.fechamentos.filter((f) => f.status === 'enviado').length; return `<a href="#/fechamentos" style="color:#fff;position:relative" aria-label="Fechamentos para conferir">${icon('inbox')}${pend ? `<span class="badge dot" style="position:absolute;top:-6px;right:-8px">${pend}</span>` : ''}</a>`; },
   rotas: [
     ['/painel', vPainel], ['/aovivo', vAoVivo], ['/estoque', vEstoque], ['/consignacao', vConsignacao], ['/remessas', vRemessas], ['/parceiros', vParceiros], ['/parceiro/:id', vParceiro],
-    ['/fechamentos', vFechamentos], ['/fechamento/:id', vFechamento], ['/novo-fechamento/:cid', vNovoFechamento], ['/financeiro', vFinanceiro],
+    ['/fechamentos', vFechamentos], ['/fechamento/:id', vFechamento], ['/novo-fechamento/:cid', vNovoFechamento], ['/editar-fechamento/:id', vEditarFechamento], ['/financeiro', vFinanceiro],
     ['/inteligencia', vInteligencia], ['/produtos', vProdutos], ['/produto/:id', vProduto],
     ['/imprimir/fechamento/:id', vImprimirFechamento], ['/imprimir/romaneio/:cid', vImprimirRomaneio],
   ].map(([p, v]) => [p, (params) => { handlers = {}; return v(params); }]),
@@ -1238,7 +1256,7 @@ const A = criarApp({
     if (info.colecao === 'fechamentos' && info.doc.status === 'enviado' && info.antes?.status !== 'enviado') toast('Novo fechamento recebido de um parceiro');
     if (info.colecao === 'pedidos' && info.novo) toast('Novo pedido de reposição recebido');
   },
-  naoRedesenhar: (rota, externo) => rota === '/novo-fechamento/:cid' && externo,
+  naoRedesenhar: (rota, externo) => (rota === '/novo-fechamento/:cid' || rota === '/editar-fechamento/:id') && externo,
   acoes: new Proxy({}, { get: (_, k) => handlers[k] || acoes[k] }),
 });
 

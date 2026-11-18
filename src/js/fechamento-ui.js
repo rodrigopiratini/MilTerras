@@ -13,6 +13,21 @@ export function novoWizard(s, cid) {
   return { cid, step: 1, contagem, esperado: { ...contagem }, just: {}, repo: null, forma: D.cliente(s, cid).formaPadrao, obs: '', lotesSel: null, acertoQtd: {} };
 }
 
+// Estado sem um fechamento ainda não aprovado: base para editá-lo como se ainda não tivesse sido enviado
+export const semFechamento = (s, id) => (id ? { ...s, fechamentos: s.fechamentos.filter((f) => f.id !== id) } : s);
+
+// Assistente já preenchido com um fechamento enviado (aguardando conferência), para a Gestão corrigir
+export function wizardDe(s, f) {
+  const contagem = {}, esperado = {}, just = {};
+  for (const i of f.itens) { contagem[i.produtoId] = i.contagem; esperado[i.produtoId] = i.esperado ?? i.contagem; if (i.justificativa) just[i.produtoId] = i.justificativa; }
+  const acertoQtd = {};
+  if (f.naoAcertado && f.acertos) for (const a of f.acertos) acertoQtd[a.produtoId] = (acertoQtd[a.produtoId] || 0) + a.qtd;
+  return { cid: f.clienteId, step: 1, contagem, esperado, just, editId: f.id,
+    repo: Object.fromEntries((f.reposicao || []).map((r) => [r.produtoId, r.qtd])),
+    forma: f.condicao ? 'cond:' + f.condicao.id : f.formaPagamento, obs: f.obs || '',
+    lotesSel: f.lotesSel || null, lotesManual: !!f.naoAcertado, acertoQtd };
+}
+
 // Prévia do fechamento com os lotes escolhidos (valor a pagar = só os lotes selecionados)
 function totais(s, w) {
   const f = D.montarFechamento(s, w.cid, { contagem: w.contagem, lotesSel: w.lotesSel, acertoQtd: w.acertoQtd });
@@ -111,10 +126,12 @@ export function renderWizard(s, w, { modo = 'cliente' } = {}) {
   }
   if (w.step === 3) {
     const disp = modo === 'gestor' ? D.estoqueCentral(s) : D.estoqueDisponivel(s);
-    if (!w.repo) {
+    if (!w.repo || !w.sug) {
       const sug = D.sugestaoReposicao(s, w.cid, w.contagem);
-      w.repo = Object.fromEntries(Object.entries(sug).map(([pid, x]) => [pid, Math.min(x.qtd, Math.max(0, disp[pid] || 0))]));
-      for (const [pid, q] of Object.entries(c.filaPedido || {})) w.repo[pid] = Math.min(Math.max(w.repo[pid] || 0, q), Math.max(0, disp[pid] || 0)); // fila de pedido do parceiro
+      if (!w.repo) {
+        w.repo = Object.fromEntries(Object.entries(sug).map(([pid, x]) => [pid, Math.min(x.qtd, Math.max(0, disp[pid] || 0))]));
+        for (const [pid, q] of Object.entries(c.filaPedido || {})) w.repo[pid] = Math.min(Math.max(w.repo[pid] || 0, q), Math.max(0, disp[pid] || 0)); // fila de pedido do parceiro
+      } else for (const pid of Object.keys(w.repo)) sug[pid] ||= { qtd: 0, rate: 0, alvo: 0 }; // edição: mantém o que já tinha sido pedido
       w.sug = sug;
       w.recs = D.recomendacoes(s, w.cid, 3).map((r) => r.produtoId);
     }
@@ -149,7 +166,7 @@ export function renderWizard(s, w, { modo = 'cliente' } = {}) {
   const foot = `<div class="row between wz-foot">
     ${w.step > 1 ? `<button class="btn ghost" data-act="wz-back">${icon('arrowL')} Voltar</button>` : `<span></span>`}
     ${w.step < 4 ? `<button class="btn" data-act="wz-next">Continuar ${icon('arrowR')}</button>`
-      : modo === 'gestor' ? `<div class="row"><button class="btn ghost" data-act="wz-send">Salvar p/ conferência</button><button class="btn ok" data-act="wz-approve">${icon('check')} Aprovar agora</button></div>`
+      : modo === 'gestor' ? `<div class="row"><button class="btn ghost" data-act="wz-send">${w.editId ? 'Salvar alterações' : 'Salvar p/ conferência'}</button><button class="btn ok" data-act="wz-approve">${icon('check')} Aprovar agora</button></div>`
       : `<button class="btn ok" data-act="wz-send">${icon('check')} Enviar fechamento</button>`}</div>`;
   return steps + head + body + foot;
 }
@@ -190,17 +207,23 @@ export function wizardHandlers(w, rerender, commit, onDone, modo = 'cliente', to
   }
   function finish(aprovar) {
     let f;
-    commit((s) => {
+    commit((st) => {
+      // edição: recalcula sem o fechamento antigo e o substitui no mesmo lugar (mesmo número)
+      const antigo = w.editId && st.fechamentos.find((x) => x.id === w.editId);
+      const s = semFechamento(st, antigo?.id);
       const cond = w.forma?.startsWith('cond:') ? w.forma.slice(5) : null;
       // Gestão: a contagem dela vale como venda; só registra "ajuste" onde o parceiro lançou vendas no app
       const per = D.periodoAtual(s, w.cid);
       const lancou = new Set(D.vendasCliente(s, w.cid, per.marco).map((v) => v.produtoId));
-      const esperado = modo === 'gestor' ? Object.fromEntries(Object.entries(w.esperado).filter(([pid]) => lancou.has(pid))) : w.esperado;
+      const esperado = modo === 'gestor' ? Object.fromEntries(Object.entries(w.esperado).filter(([pid]) => lancou.has(pid) || (w.just[pid] || '').trim())) : w.esperado;
       f = D.montarFechamento(s, w.cid, { contagem: w.contagem, reposicao: w.repo || {}, forma: cond ? null : w.forma, condicaoId: cond, obs: w.obs, criadoPor: modo, esperado, justificativas: w.just, lotesSel: w.lotesSel, acertoQtd: w.acertoQtd });
-      D.enviarFechamento(s, f);
-      const cl = D.cliente(s, w.cid);
+      if (antigo) {
+        Object.assign(f, { id: antigo.id, numero: antigo.numero, criadoPor: antigo.criadoPor, enviadoEm: antigo.enviadoEm, ts: antigo.ts, editadoEm: today() });
+        st.fechamentos[st.fechamentos.indexOf(antigo)] = f;
+      } else D.enviarFechamento(st, f);
+      const cl = D.cliente(st, w.cid);
       if (cl.filaPedido) { const fila = { ...cl.filaPedido }; for (const r of f.reposicao) delete fila[r.produtoId]; cl.filaPedido = fila; }
-      if (aprovar) f.avisos = D.aprovarFechamento(s, f.id);
+      if (aprovar) f.avisos = D.aprovarFechamento(st, f.id);
     }, 'fechamento');
     onDone(f, aprovar);
   }
