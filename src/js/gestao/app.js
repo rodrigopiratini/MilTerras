@@ -414,7 +414,7 @@ function vRemessas({ query }) {
         ${st.prox ? `<button class="btn sm" data-act="avancarRem" data-id="${r.id}" data-st="${st.prox}">${st.acao}</button>` : ''}
         <a class="btn ghost sm" href="#/imprimir/romaneio/${r.clienteId}?r=${r.id}" title="Romaneio">${icon('print')}</a>
         ${r.status === 'em_rota' || r.status === 'separado' ? `<a class="btn ghost sm" target="_blank" rel="noopener" href="${waLink(c?.telefone, `Olá ${(c?.contato || '').split(' ')[0]}! Sua reposição Mil Terras (${r.garrafas} garrafas) ${r.status === 'em_rota' ? 'saiu para entrega' : 'está separada e sai em breve'}. 🍷`)}" title="Avisar no WhatsApp">${icon('whatsapp')}</a>` : ''}
-        ${r.status !== 'entregue' ? `<button class="btn ghost sm" data-act="cancelarRem" data-id="${r.id}" title="Cancelar remessa">${icon('x')}</button>` : ''}
+        ${!D.bloqueioRemessa(s, r.id) ? `<button class="btn ghost sm" data-act="corrigirRem" data-id="${r.id}" title="Trocar parceiro / cancelar">${icon('edit')}</button>` : ''}
         ${r.status !== 'entregue' && r.status !== 'a_separar' ? `<button class="btn ghost sm" data-act="voltarRem" data-id="${r.id}" data-st="${cols[cols.indexOf(r.status) - 1]}" title="Voltar etapa">${icon('arrowL')}</button>` : ''}
       </div></div>`;
   };
@@ -1202,17 +1202,35 @@ const acoes = {
     store.commit((s2) => D.avancarRemessa(s2, el.dataset.id, st));
     toast(`Remessa: ${D.STATUS_ENTREGA[st].label}`);
   },
-  cancelarRem: (el) => {
+  // Corrigir remessa: trocar o parceiro (lançada para o errado) ou cancelar (garrafas voltam ao estoque central)
+  corrigirRem: (el) => {
     const s = S();
     const r = D.remessas(s).find((x) => x.id === el.dataset.id);
     if (!r) return;
     const c = D.cliente(s, r.clienteId);
-    modal({ title: `Cancelar remessa ${esc(r.protocolo || '')}`,
-      body: `<p class="small ink2" style="margin-top:0"><b>${esc(c?.nome || '—')}</b> · ${plural(r.garrafas, 'garrafa')} · ${money(r.valor)}<br>${r.itens.map((i) => `${i.qtd}× ${esc(D.produto(s, i.produtoId)?.nome)}`).join(' · ')}</p>
-        <p class="small">As garrafas <b>voltam para o estoque central</b> e a remessa sai do quadro. Nada muda no saldo do parceiro (ela ainda não tinha sido entregue).</p>
-        <form id="fcanc"><label class="field"><span>Motivo (opcional)</span><input class="input" name="motivo" maxlength="200" placeholder="Ex.: parceiro desistiu / não coletou"></label></form>`,
-      foot: '<button class="btn ghost" data-act="close">Voltar</button><button class="btn" style="background:var(--crit)" data-act="ok">Cancelar remessa</button>',
-      handlers: { ok: () => { const m = String(new FormData(document.getElementById('fcanc')).get('motivo') || '').trim(); store.commit((s2) => D.cancelarRemessa(s2, r.id, m), 'remessa'); closeModal(); toast('Remessa cancelada — garrafas de volta ao estoque central'); } } });
+    const ent = r.status === 'entregue';
+    modal({ title: `Corrigir remessa ${esc(r.protocolo || '')}`,
+      body: `<p class="small ink2" style="margin-top:0"><b>${esc(c?.nome || '—')}</b> · ${D.STATUS_ENTREGA[r.status].label} · ${plural(r.garrafas, 'garrafa')} · ${money(r.valor)}<br>${r.itens.map((i) => `${i.qtd}× ${esc(D.produto(s, i.produtoId)?.nome)}`).join(' · ')}</p>
+        <form id="fcanc" class="col">
+          <div class="card"><div class="label">Lançou para o parceiro errado?</div>
+            <label class="field mt-s"><span>Parceiro certo</span><select class="input" name="cliente"><option value="">Escolha…</option>${s.clientes.filter((x) => x.ativo && x.id !== r.clienteId).map((x) => `<option value="${x.id}">${esc(x.nome)}${x.cidade ? ' — ' + esc(x.cidade) : ''}</option>`).join('')}</select></label>
+            <div class="tiny muted mt-s">A remessa passa para ele com o mesmo protocolo${ent ? ' e já como entregue: as garrafas saem do saldo de ' + esc(c?.nome || '') + ' e entram no do parceiro certo' : ''}.</div>
+            <button type="button" class="btn mt-s" data-act="trocar">${icon('swap')} Trocar parceiro</button></div>
+          <div class="card"><div class="label">Ou cancelar a remessa</div>
+            <div class="tiny muted mt-s">As garrafas <b>voltam para o estoque central</b> e a remessa sai do quadro${ent ? ` (e do saldo de ${esc(c?.nome || '')})` : ''}.</div>
+            <label class="field mt-s"><span>Motivo (opcional)</span><input class="input" name="motivo" maxlength="200" placeholder="Ex.: parceiro desistiu / não coletou / lançada por engano"></label>
+            <button type="button" class="btn mt-s" style="background:var(--crit)" data-act="ok">${icon('x')} Cancelar remessa</button></div>
+        </form>`,
+      foot: '<button class="btn ghost" data-act="close">Voltar</button>',
+      handlers: {
+        trocar: () => {
+          const novo = new FormData(document.getElementById('fcanc')).get('cliente');
+          if (!novo) return toast('Escolha o parceiro certo');
+          store.commit((s2) => D.trocarParceiroRemessa(s2, r.id, novo), 'remessa');
+          closeModal(); toast(`Remessa passada para ${D.cliente(S(), novo)?.nome || 'o parceiro'}`);
+        },
+        ok: () => { const m = String(new FormData(document.getElementById('fcanc')).get('motivo') || '').trim(); store.commit((s2) => D.cancelarRemessa(s2, r.id, m), 'remessa'); closeModal(); toast('Remessa cancelada — garrafas de volta ao estoque central'); },
+      } });
   },
   voltarRem: (el) => { store.commit((s2) => D.avancarRemessa(s2, el.dataset.id, el.dataset.st)); toast(`Remessa voltou para: ${D.STATUS_ENTREGA[el.dataset.st].label}`); },
 };

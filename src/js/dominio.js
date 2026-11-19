@@ -130,11 +130,33 @@ export function avancarRemessa(s, remessaId, status, { recebidoPor, data = today
   }
 }
 
-// Cancela uma remessa ainda não entregue (o parceiro desistiu ou não coletou): as garrafas voltam
+// Cancela uma remessa ainda não entregue (ou entregue sem nada vendido) (o parceiro desistiu ou não coletou): as garrafas voltam
 // para o estoque central e a remessa some do quadro. O pedido / fechamento de origem guarda o registro.
+// Remessa entregue pode ser desfeita enquanto nada dela foi vendido, acertado ou devolvido e não há
+// fechamento do parceiro depois da entrega. Devolve o motivo do bloqueio (ou '' se pode).
+export function bloqueioRemessa(s, remessaId) {
+  const r = remessas(s).find((x) => x.id === remessaId);
+  if (!r) return 'Remessa não encontrada';
+  if (r.status !== 'entregue') return '';
+  const l = lotes(s, r.clienteId).find((x) => x.id === remessaId);
+  if (l && Object.values(l.itens).some((x) => x.vendido || x.baixa || x.acertado)) return 'Já há venda, acerto ou devolução contada desta remessa';
+  if (s.fechamentos.some((f) => f.clienteId === r.clienteId && f.fim >= (r.entregueEm || r.data))) return 'O parceiro já tem fechamento depois desta entrega';
+  const est = saldoEstimado(s, r.clienteId);
+  if (r.itens.some((i) => (est[i.produtoId] || 0) < i.qtd)) return 'O parceiro já lançou vendas que dependem destas garrafas';
+  return '';
+}
+
+// Remessa lançada para o parceiro errado: passa para o parceiro certo (mesmo protocolo, mesma etapa)
+export function trocarParceiroRemessa(s, remessaId, clienteId) {
+  if (bloqueioRemessa(s, remessaId)) return null;
+  const antigo = remessas(s).find((x) => x.id === remessaId)?.clienteId;
+  for (const m of s.movs) if (m.remessaId === remessaId) { m.clienteId = clienteId; m.obs = [m.obs, 'parceiro corrigido'].filter(Boolean).join(' · '); }
+  return antigo;
+}
+
 export function cancelarRemessa(s, remessaId, motivo = '') {
   const r = remessas(s).find((x) => x.id === remessaId);
-  if (!r || r.status === 'entregue') return null;
+  if (!r || bloqueioRemessa(s, remessaId)) return null;
   s.movs = s.movs.filter((m) => m.remessaId !== remessaId);
   const reg = { remessaId, protocolo: r.protocolo, itens: r.itens.map(({ produtoId, qtd }) => ({ produtoId, qtd })), motivo, em: today() };
   const p = pedidos(s).find((x) => x.remessaId === remessaId);
