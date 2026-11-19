@@ -172,9 +172,21 @@ export function registrarPagamentoVenda(s, remessaId, { data = today(), partes }
 // Recebimentos (caixa) das vendas diretas: antigas/de balcão entram na data do lançamento
 function recebimentosVendas(s) {
   const out = [];
-  for (const m of s.movs) if (m.tipo === 'venda_direta' && !m.remessaId) out.push({ data: m.data, valor: m.qtd * (m.precoUnit || 0), forma: m.forma || '', descricao: `Venda direta${m.comprador ? ' · ' + m.comprador : ''} · ${m.qtd}× ${produto(s, m.produtoId)?.nome}` });
+  for (const m of s.movs) if (m.tipo === 'venda_direta' && !m.remessaId) out.push({ data: m.data, movId: m.id, valor: m.qtd * (m.precoUnit || 0), forma: m.forma || '', descricao: `Venda direta${m.comprador ? ' · ' + m.comprador : ''} · ${m.qtd}× ${produto(s, m.produtoId)?.nome}` });
   for (const r of vendasDiretas(s)) for (const p of r.pagamentos) out.push({ data: p.data, valor: p.valor, forma: p.forma + (p.parcelas > 1 ? ` em ${p.parcelas}x` : ''), descricao: `Venda direta ${r.protocolo}${r.comprador ? ' · ' + r.comprador : ''}` });
   return out;
+}
+
+// Venda direta antiga / de balcão (sem esteira) lançada por engano: exclui o lançamento inteiro
+// (todos os rótulos gravados juntos) — as garrafas voltam ao estoque central e o valor sai do financeiro
+export const lancamentoVenda = (s, movId) => {
+  const m = s.movs.find((x) => x.id === movId && x.tipo === 'venda_direta' && !x.remessaId);
+  return m ? s.movs.filter((x) => x.tipo === 'venda_direta' && !x.remessaId && x.ts === m.ts && x.data === m.data && (x.comprador || '') === (m.comprador || '')) : [];
+};
+export function excluirVendaDireta(s, movId) {
+  const ids = new Set(lancamentoVenda(s, movId).map((m) => m.id));
+  s.movs = s.movs.filter((m) => !ids.has(m.id));
+  return ids.size;
 }
 
 // Edita uma remessa / venda direta ainda não entregue: troca rótulos, quantidades e (venda) comprador, preços, forma
@@ -663,7 +675,7 @@ export function balancoMes(s, mes) {
   const despesas = s.despesas.filter((d) => d.data.startsWith(mes));
   const recebimentos = [
     ...s.fechamentos.flatMap((f) => recebimentosDe(f).filter((p) => (p.data || '').startsWith(mes)).map((p) => ({ data: p.data, descricao: `Fechamento ${cliente(s, f.clienteId)?.nome || ''}`, forma: p.forma + (p.parcelas > 1 ? ` em ${p.parcelas}x` : ''), valor: p.valor, link: `#/fechamento/${f.id}` }))),
-    ...recebimentosVendas(s).filter((p) => p.data.startsWith(mes)).map((p) => ({ ...p, link: '#/remessas' })),
+    ...recebimentosVendas(s).filter((p) => p.data.startsWith(mes)).map((p) => (p.movId ? p : { ...p, link: '#/remessas' })),
   ].sort((a, b) => (a.data < b.data ? -1 : 1));
   const receita = sum(vendas, (v) => v.receita), cmv = sum(vendas, (v) => v.cmv);
   const compras = sum(despesas.filter((d) => d.categoria === 'Compra de mercadoria'), (d) => d.valor);

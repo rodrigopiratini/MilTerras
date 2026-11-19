@@ -747,7 +747,7 @@ function vFinanceiro({ query }) {
     </div>
     <div class="grid g2 mt">
       <div class="card pad-0"><div style="padding:16px 16px 0" class="row between"><h2>Recebimentos</h2><b class="small">${money(b.recebido)}</b></div>
-        <div class="list" style="padding:0 16px">${b.recebimentos.map((r) => `<${r.link ? `a href="${r.link}"` : 'div'} class="li" data-busca="${esc(r.descricao + ' ' + (r.forma || ''))}"><div class="grow"><div class="t">${esc(r.descricao)}</div><div class="s">${date(r.data)}${r.forma ? ' · ' + esc(r.forma) : ''}</div></div><div class="num up">${money(r.valor)}</div></${r.link ? 'a' : 'div'}>`).join('') || empty('Nenhum recebimento', 'money')}</div></div>
+        <div class="list" style="padding:0 16px">${b.recebimentos.map((r) => `<${r.link ? `a href="${r.link}"` : 'div'} class="li" data-busca="${esc(r.descricao + ' ' + (r.forma || ''))}"><div class="grow"><div class="t">${esc(r.descricao)}</div><div class="s">${date(r.data)}${r.forma ? ' · ' + esc(r.forma) : ''}</div></div><div class="num up">${money(r.valor)}</div>${r.movId ? `<button class="iconbtn" data-act="delVenda" data-id="${r.movId}" aria-label="Excluir venda" title="Excluir este lançamento de venda direta">${icon('trash')}</button>` : ''}</${r.link ? 'a' : 'div'}>`).join('') || empty('Nenhum recebimento', 'money')}</div></div>
       <div class="card pad-0"><div style="padding:16px 16px 0" class="row between"><h2>Despesas</h2><b class="small">${money(b.operacionais + b.compras)}</b></div>
         <div class="list" style="padding:0 16px">${b.despesas.map((d) => `<div class="li" data-busca="${esc(d.descricao + ' ' + d.categoria)}"><div class="grow"><div class="t">${esc(d.descricao)}</div><div class="s">${esc(d.categoria)} · ${date(d.data)}</div></div><div class="num down">${money(d.valor)}</div><button class="iconbtn" data-act="delDesp" data-id="${d.id}" aria-label="Excluir">${icon('trash')}</button></div>`).join('') || empty('Nenhuma despesa', 'money')}</div></div>
     </div>`);
@@ -1092,6 +1092,13 @@ const acoes = {
       toast('Fechamento aprovado — conta a receber gerada');
       if (av?.length) setTimeout(() => toast(av[0]), 2900);
     });
+  },
+  delVenda: (el) => {
+    const s = S();
+    const ms = D.lancamentoVenda(s, el.dataset.id);
+    if (!ms.length) return;
+    confirmar(`Excluir a venda direta${ms[0].comprador ? ` de <b>${esc(ms[0].comprador)}</b>` : ''} de ${date(ms[0].data)}?<br><span class="small">${ms.map((m) => `${m.qtd}× ${esc(D.produto(s, m.produtoId)?.nome)}`).join(' · ')} — <b>${money(sum(ms, (m) => m.qtd * (m.precoUnit || 0)))}</b></span><br><span class="small muted">As garrafas voltam para o estoque central e o valor sai do financeiro.</span>`, { ok: 'Excluir venda', titulo: 'Excluir venda direta' })
+      .then((y) => { if (!y) return; let n = 0; store.commit((st) => { n = D.excluirVendaDireta(st, el.dataset.id); }, 'venda'); toast(`Venda excluída (${plural(n, 'rótulo')})`); });
   },
   receberVenda: (el) => acoes.pagar(el, true),
   pagar: (el, venda) => {
