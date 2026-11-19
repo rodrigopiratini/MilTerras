@@ -150,7 +150,7 @@ function vPainel() {
   const diaMes = new Date().getDate();
   const diasMes = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate();
   const projecao = (mes.receita / diaMes) * diasMes;
-  const cr = D.contasReceber(s);
+  const cr = [...D.contasReceber(s), ...D.vendasAReceber(s)];
   const vencido = sum(cr.filter((x) => x.atraso > 0), (x) => x.saldo);
   const est = D.estoqueCentral(s);
   const cons = D.consignado(s);
@@ -284,7 +284,13 @@ function modalMov(tipo, snap = {}, onSalvo) {
       <label class="field"><span>${tipo === 'entrada' ? 'Documento / importação' : 'Observação'}</span><input class="input" name="obs" placeholder="${tipo === 'entrada' ? 'Ex.: Importação Dieci Terre #3' : ''}"></label></div>
       ${tipo === 'venda_direta' ? `<div class="grid g2"><label class="field"><span>Comprador</span><input class="input" name="comprador" maxlength="120" placeholder="Quem comprou (pessoa ou empresa)"></label>
       <label class="field"><span>Forma de pagamento</span><select class="input" name="forma"><option value="">—</option>${D.FORMAS_PAGAMENTO.map((f) => `<option>${esc(f)}</option>`).join('')}</select></label></div>
-      <label class="field"><span>Contato / documento (opcional)</span><input class="input" name="contato" maxlength="120" placeholder="Telefone, e-mail, CPF/CNPJ, nota fiscal…"></label>` : ''}
+      <label class="field"><span>Contato / documento (opcional)</span><input class="input" name="contato" maxlength="120" placeholder="Telefone, e-mail, CPF/CNPJ, nota fiscal…"></label>
+      <div class="grid g2"><label class="field"><span>Entrega</span><select class="input" name="entrega">
+        <option value="a_separar">Pela esteira de Remessas (separar, entregar / cliente retira)</option>
+        <option value="entregue">Já entregue — a receber</option>
+        <option value="pago">Já entregue e pago (balcão)</option></select></label>
+      <label class="field"><span>Vencimento (opcional)</span><input class="input" type="date" name="vencimento"></label></div>
+      <div class="tiny muted">Pela esteira, as garrafas ficam reservadas no estoque e a conta a receber nasce quando você marcar <b>Entregue</b> (vence na entrega, se não informar a data).</div>` : ''}
       ${tipo === 'ajuste' ? `<div class="seg"><button type="button" class="on" data-act="sinal" data-v="1">Adicionar</button><button type="button" data-act="sinal" data-v="-1">Remover</button></div><input type="hidden" name="sinal" value="1">` : ''}
       ${tipo === 'entrada' ? `<div class="row between"><span class="small muted">Informe a quantidade de cada rótulo recebido.</span><button type="button" class="btn ghost sm" data-act="novoRotuloMov">${icon('plus')} Cadastrar novo rótulo</button></div>` : ''}
       <div class="card pad-0"><div class="list" style="padding:0 14px">${s.produtos.filter((p) => p.ativo).map((p) => `<div class="li li-mov">${thumb(p, 'sm')}<div class="grow"><div class="t">${esc(p.nome)}</div><div class="s">Saldo ${est[p.id]}${tipo === 'entrada' ? '' : tipo === 'venda_direta' ? ` · tabela ${money(p.preco)}` : ''}</div></div>
@@ -310,6 +316,15 @@ function modalMov(tipo, snap = {}, onSalvo) {
         if (falta) return toast(`${falta.p.nome}: só há ${Math.max(0, est[falta.p.id])} no estoque central`);
         if (tipo === 'ajuste' && String(obs).trim().length < 3) return toast('Informe o motivo do ajuste em Observação');
         let total = 0;
+        if (tipo === 'venda_direta') {
+          const ent = fd.get('entrega');
+          store.commit((st) => D.criarVendaDireta(st, { itens: itens.map(({ p, q }) => ({ produtoId: p.id, qtd: q, precoUnit: parseMoney(fd.get('preco:' + p.id)) })), data, obs,
+            status: ent === 'a_separar' ? 'a_separar' : 'entregue', pago: ent === 'pago', vencimento: fd.get('vencimento') || '', ...extra }), 'venda');
+          closeModal(); toast(ent === 'a_separar' ? 'Venda direta na esteira de Remessas' : ent === 'pago' ? 'Venda direta registrada e paga' : 'Venda direta registrada — conta a receber criada');
+          if (onSalvo) return onSalvo();
+          location.hash = ent === 'a_separar' ? '#/remessas' : location.hash.split('?')[0];
+          return;
+        }
         store.commit((st) => {
           for (const { p, q } of itens) {
             if (tipo === 'entrada') { const cu = parseMoney(fd.get('custo:' + p.id)) || D.custoDe(st, p.id); total += cu * q; D.addMov(st, { data, tipo, produtoId: p.id, qtd: q, custoUnit: cu, obs }); }
@@ -402,19 +417,21 @@ function vRemessas({ query }) {
   const entregues = todas.filter((r) => r.status === 'entregue').slice(0, +(query.mais || 8));
   const card = (r) => {
     const c = D.cliente(s, r.clienteId);
-    const st = D.STATUS_ENTREGA[r.status];
+    const vd = r.tipo === 'venda';
+    const st = vd ? { ...D.STATUS_ENTREGA[r.status], ...({ separado: { acao: 'Pronto p/ entrega / retirada' } }[r.status] || {}) } : D.STATUS_ENTREGA[r.status];
     const dias = diffDays(today(), r.data);
-    return `<div class="card kcard" data-busca="${esc((c?.nome || '') + ' ' + r.itens.map((i) => D.produto(s, i.produtoId)?.nome).join(' '))}">
+    return `<div class="card kcard" data-busca="${esc((c?.nome || r.comprador || '') + ' ' + r.itens.map((i) => D.produto(s, i.produtoId)?.nome).join(' '))}">
       <div class="tiny" style="font-weight:600;letter-spacing:.04em;color:var(--dourado)">${esc(r.protocolo || '')}</div>
-      <div class="row between"><b class="ellipsis">${esc(c?.nome || '—')}</b>${r.status !== 'entregue' && dias >= 2 ? badge(`${dias}d`, 'warn') : ''}</div>
-      <div class="tiny muted">${date(r.data)} · ${r.ref?.startsWith('pd') ? 'pedido do parceiro' : r.ref ? 'reposição de fechamento' : esc(r.obs || 'remessa manual')}</div>
+      <div class="row between"><b class="ellipsis">${vd ? `${badge('Venda direta', 'opp')} ${esc(r.comprador || 'sem comprador')}` : esc(c?.nome || '—')}</b>${r.status !== 'entregue' && dias >= 2 ? badge(`${dias}d`, 'warn') : ''}</div>
+      <div class="tiny muted">${date(r.data)} · ${vd ? `${esc(r.forma || 'forma a definir')}${r.status === 'entregue' ? (r.saldo > 0 ? ` · <b style="color:var(--warn)">a receber ${money(r.saldo)}</b>` : ' · <b style="color:var(--ok)">pago</b>') : ''}` : r.ref?.startsWith('pd') ? 'pedido do parceiro' : r.ref ? 'reposição de fechamento' : esc(r.obs || 'remessa manual')}</div>
       <div class="small mt-s">${r.itens.map((i) => `${i.qtd}× ${esc(D.produto(s, i.produtoId).nome)}`).join('<br>')}</div>
       <div class="row between mt-s"><b>${plural(r.garrafas, 'garrafa')} · ${money(r.valor)}</b>${r.status === 'entregue' ? `<span class="tiny muted">${r.entregueEm ? date(r.entregueEm) : ''}${r.recebidoPor ? ' · ' + esc(r.recebidoPor) : ''}</span>` : ''}</div>
       <div class="row wrap gap-s mt-s">
         ${st.prox ? `<button class="btn sm" data-act="avancarRem" data-id="${r.id}" data-st="${st.prox}">${st.acao}</button>` : ''}
-        <a class="btn ghost sm" href="#/imprimir/romaneio/${r.clienteId}?r=${r.id}" title="Romaneio">${icon('print')}</a>
-        ${r.status === 'em_rota' || r.status === 'separado' ? `<a class="btn ghost sm" target="_blank" rel="noopener" href="${waLink(c?.telefone, `Olá ${(c?.contato || '').split(' ')[0]}! Sua reposição Mil Terras (${r.garrafas} garrafas) ${r.status === 'em_rota' ? 'saiu para entrega' : 'está separada e sai em breve'}. 🍷`)}" title="Avisar no WhatsApp">${icon('whatsapp')}</a>` : ''}
-        ${!D.bloqueioRemessa(s, r.id) ? `<button class="btn ghost sm" data-act="corrigirRem" data-id="${r.id}" title="Trocar parceiro / cancelar">${icon('edit')}</button>` : ''}
+        ${vd && r.status === 'entregue' && r.saldo > 0 ? `<button class="btn sm ok" data-act="receberVenda" data-id="${r.id}">${icon('money')} Receber</button>` : ''}
+        ${vd ? '' : `<a class="btn ghost sm" href="#/imprimir/romaneio/${r.clienteId}?r=${r.id}" title="Romaneio">${icon('print')}</a>`}
+        ${!vd && (r.status === 'em_rota' || r.status === 'separado') ? `<a class="btn ghost sm" target="_blank" rel="noopener" href="${waLink(c?.telefone, `Olá ${(c?.contato || '').split(' ')[0]}! Sua reposição Mil Terras (${r.garrafas} garrafas) ${r.status === 'em_rota' ? 'saiu para entrega' : 'está separada e sai em breve'}. 🍷`)}" title="Avisar no WhatsApp">${icon('whatsapp')}</a>` : ''}
+        ${!D.bloqueioRemessa(s, r.id) ? `<button class="btn ghost sm" data-act="corrigirRem" data-id="${r.id}" title="Editar / cancelar">${icon('edit')}</button>` : ''}
         ${r.status !== 'entregue' && r.status !== 'a_separar' ? `<button class="btn ghost sm" data-act="voltarRem" data-id="${r.id}" data-st="${cols[cols.indexOf(r.status) - 1]}" title="Voltar etapa">${icon('arrowL')}</button>` : ''}
       </div></div>`;
   };
@@ -741,6 +758,7 @@ function vFinanceiroPeriodo({ query }) {
   const meses = +(query.m || 6);
   const serie = D.serieMensal(s, meses);
   const cr = D.contasReceber(s);
+  const crv = D.vendasAReceber(s);
   const tot = serie.reduce((a, m) => ({ receita: a.receita + m.receita, cmv: a.cmv + m.cmv, despesas: a.despesas + m.despesas, lucro: a.lucro + m.lucro, recebido: a.recebido + m.recebido }), { receita: 0, cmv: 0, despesas: 0, lucro: 0, recebido: 0 });
   const desp = sortBy(s.despesas, (d) => d.data, true).slice(0, 12);
   const porCat = Object.entries(s.despesas.filter((d) => d.data >= addDays(today(), -30 * meses) && d.categoria !== 'Compra de mercadoria').reduce((m, d) => ((m[d.categoria] = (m[d.categoria] || 0) + d.valor), m), {})).sort((a, b) => b[1] - a[1]);
@@ -755,8 +773,8 @@ function vFinanceiroPeriodo({ query }) {
       ${[['Faturamento', 'receita'], ['(−) Custo das mercadorias', 'cmv'], ['= Lucro bruto', null], ['(−) Despesas operacionais', 'despesas'], ['= Resultado', 'lucro'], ['Recebido no caixa', 'recebido']].map(([n, k]) => `<tr><td style="white-space:nowrap;${n.startsWith('=') ? 'font-weight:600' : ''}">${n}</td>${serie.map((m) => `<td class="r">${money0(k ? m[k] : m.receita - m.cmv)}</td>`).join('')}<td class="r"><b>${money0(k ? tot[k] : tot.receita - tot.cmv)}</b></td></tr>`).join('')}
     </tbody></table></div></div>
     <div class="grid g2 mt">
-      <div class="card pad-0"><div style="padding:16px 16px 0" class="row between"><h2>Contas a receber</h2><span class="small muted">${money(sum(cr, (x) => x.saldo))}</span></div>
-        <div class="list" style="padding:0 16px">${cr.map((f) => `<a class="li" href="#/fechamento/${f.id}"><div class="grow"><div class="t">${esc(D.cliente(s, f.clienteId).nome)}</div><div class="s">${esc(f.formaPagamento)} · vence ${date(f.vencimento)}</div></div><div class="right"><div class="num" style="font-weight:600">${money(f.saldo)}</div>${f.atraso ? badge(`${f.atraso}d atraso`, 'crit') : badge(relDays(f.vencimento), 'info')}</div></a>`).join('') || empty('Nada a receber', 'check')}</div></div>
+      <div class="card pad-0"><div style="padding:16px 16px 0" class="row between"><h2>Contas a receber</h2><span class="small muted">${money(sum(cr, (x) => x.saldo) + sum(crv, (x) => x.saldo))}</span></div>
+        <div class="list" style="padding:0 16px">${crv.map((v) => `<div class="li"><div class="grow"><div class="t">${badge('Venda direta', 'opp')} ${esc(v.comprador || v.protocolo)}</div><div class="s">${esc(v.protocolo)} · ${esc(v.forma || '—')} · vence ${date(v.vencimento || v.entregueEm)}</div></div><div class="right"><div class="num" style="font-weight:600">${money(v.saldo)}</div>${v.atraso ? badge(`${v.atraso}d atraso`, 'crit') : badge(relDays(v.vencimento || v.entregueEm), 'info')}</div><button class="btn sm ok" data-act="receberVenda" data-id="${v.id}">Receber</button></div>`).join('')}${cr.map((f) => `<a class="li" href="#/fechamento/${f.id}"><div class="grow"><div class="t">${esc(D.cliente(s, f.clienteId).nome)}</div><div class="s">${esc(f.formaPagamento)} · vence ${date(f.vencimento)}</div></div><div class="right"><div class="num" style="font-weight:600">${money(f.saldo)}</div>${f.atraso ? badge(`${f.atraso}d atraso`, 'crit') : badge(relDays(f.vencimento), 'info')}</div></a>`).join('') || (crv.length ? '' : empty('Nada a receber', 'check'))}</div></div>
       <div class="card pad-0"><div style="padding:16px 16px 0"><h2>Últimas despesas</h2></div>
         <div class="list" style="padding:0 16px">${desp.map((d) => `<div class="li"><div class="grow"><div class="t">${esc(d.descricao)}</div><div class="s">${esc(d.categoria)} · ${date(d.data)}</div></div><div class="num">${money(d.valor)}</div><button class="iconbtn" data-act="delDesp" data-id="${d.id}" aria-label="Excluir">${icon('trash')}</button></div>`).join('')}</div></div>
     </div>`);
@@ -1075,17 +1093,20 @@ const acoes = {
       if (av?.length) setTimeout(() => toast(av[0]), 2900);
     });
   },
-  pagar: (el) => {
+  receberVenda: (el) => acoes.pagar(el, true),
+  pagar: (el, venda) => {
     const s = S();
-    const f = s.fechamentos.find((x) => x.id === el.dataset.id);
-    const c = D.cliente(s, f.clienteId);
-    const aberto = D.saldoAberto(f);
+    // venda direta: mesmo formulário, gravando os pagamentos na venda
+    const vd = venda === true && D.vendasDiretas(s).find((x) => x.id === el.dataset.id);
+    const f = vd ? { formaPagamento: vd.forma || 'PIX', pagamentos: vd.pagamentos } : s.fechamentos.find((x) => x.id === el.dataset.id);
+    const c = vd ? { nome: `Venda direta ${vd.protocolo}${vd.comprador ? ' · ' + vd.comprador : ''}`, formasPagamento: [], formaPadrao: 'PIX' } : D.cliente(s, f.clienteId);
+    const aberto = vd ? vd.saldo : D.saldoAberto(f);
     let linhas = f.condicao ? D.dividirCondicao(f.condicao, aberto) : [{ forma: f.formaPagamento || c.formaPadrao, valor: aberto, parcelas: 1 }];
     const formas = [...new Set([...D.FORMAS_PAGAMENTO, ...c.formasPagamento, ...linhas.map((l) => l.forma)])];
     const ler = () => { const fm = document.getElementById('fpag'); if (fm) linhas = linhas.map((_, i) => ({ forma: fm.elements['f' + i].value, valor: parseMoney(fm.elements['v' + i].value), parcelas: Math.max(1, +fm.elements['n' + i].value || 1) })); };
     const falta = () => Math.round((aberto - sum(linhas, (l) => l.valor)) * 100) / 100;
     const resumo = () => { const d = falta(); return d > 0 ? `<span style="color:var(--warn)">Faltam ${money(d)} — o restante continua em aberto (pagamento parcial).</span>` : d < 0 ? `<span style="color:var(--crit)">${money(-d)} acima do valor em aberto.</span>` : '<span style="color:var(--ok)">Valor fechado.</span>'; };
-    const corpo = () => `<form id="fpag" class="col"><div class="kpi"><div class="label">${esc(c.nome)}${f.pagamentos?.length ? ` · já recebido ${money(D.recebido(f))}` : ''}</div><div class="v">${money(aberto)}</div></div>
+    const corpo = () => `<form id="fpag" class="col"><div class="kpi"><div class="label">${esc(c.nome)}${f.pagamentos?.length ? ` · já recebido ${money(vd ? vd.recebido : D.recebido(f))}` : ''}</div><div class="v">${money(aberto)}</div></div>
       <label class="field"><span>Data</span><input class="input" type="date" name="data" value="${today()}"></label>
       <div class="label">Como foi pago</div>
       ${linhas.map((l, i) => `<div class="row gap-s wrap"><select class="input" name="f${i}" style="flex:1;min-width:140px">${formas.map((x) => `<option ${x === l.forma ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select>
@@ -1105,6 +1126,7 @@ const acoes = {
           if (!sum(linhas, (l) => l.valor)) return toast('Informe o valor recebido');
           const data = document.getElementById('fpag').elements.data.value || today();
           const parcial = falta() > 0;
+          if (vd) { store.commit((st) => D.registrarPagamentoVenda(st, vd.id, { data, partes: linhas }), 'pago'); closeModal(); return toast(parcial ? `Recebimento parcial registrado · faltam ${money(falta())}` : 'Venda direta paga'); }
           store.commit((st) => D.registrarPagamento(st, f.id, { data, partes: linhas }), 'pago');
           closeModal(); toast(parcial ? `Recebimento parcial registrado · faltam ${money(D.saldoAberto(S().fechamentos.find((x) => x.id === f.id)))}` : 'Pagamento registrado');
         },
@@ -1196,9 +1218,20 @@ const acoes = {
   },
   avancarRem: (el) => {
     const st = el.dataset.st;
-    if (st === 'entregue') return modal({ title: 'Confirmar entrega', body: `<form id="fent" class="col"><label class="field"><span>Data da entrega</span><input class="input" type="date" name="data" value="${today()}"></label><label class="field"><span>Recebido por</span><input class="input" name="quem" placeholder="Nome de quem recebeu"></label></form>`,
+    const vd = D.vendasDiretas(S()).find((x) => x.id === el.dataset.id);
+    if (st === 'entregue') return modal({ title: 'Confirmar entrega', body: `<form id="fent" class="col"><label class="field"><span>Data da entrega</span><input class="input" type="date" name="data" value="${today()}"></label><label class="field"><span>Recebido por</span><input class="input" name="quem" placeholder="Nome de quem recebeu"></label>
+        ${vd ? `<div class="card"><div class="label">Venda direta · ${money(vd.valor)}</div><label class="row small mt-s"><input type="checkbox" name="pago"> Já recebi o pagamento (${esc(vd.forma || 'PIX')})</label>
+          <label class="field mt-s"><span>Vencimento da conta a receber</span><input class="input" type="date" name="venc" value="${vd.vencimento || today()}"></label></div>` : ''}</form>`,
       foot: '<button class="btn ghost" data-act="close">Cancelar</button><button class="btn ok" data-act="ok">Confirmar entrega</button>',
-      handlers: { ok: () => { const fd = new FormData(document.getElementById('fent')); store.commit((s2) => D.avancarRemessa(s2, el.dataset.id, 'entregue', { data: fd.get('data'), recebidoPor: String(fd.get('quem') || '').trim() })); closeModal(); toast('Entrega confirmada — saldo do parceiro atualizado'); } } });
+      handlers: { ok: () => {
+        const fd = new FormData(document.getElementById('fent')); const data = fd.get('data') || today();
+        store.commit((s2) => {
+          if (vd) for (const m of s2.movs) if (m.remessaId === vd.id) m.vencimento = fd.get('venc') || data;
+          D.avancarRemessa(s2, el.dataset.id, 'entregue', { data, recebidoPor: String(fd.get('quem') || '').trim() });
+          if (vd && fd.get('pago')) D.registrarPagamentoVenda(s2, vd.id, { data });
+        });
+        closeModal(); toast(vd ? (fd.get('pago') ? 'Venda entregue e paga' : 'Venda entregue — conta a receber criada no Financeiro') : 'Entrega confirmada — saldo do parceiro atualizado');
+      } } });
     store.commit((s2) => D.avancarRemessa(s2, el.dataset.id, st));
     toast(`Remessa: ${D.STATUS_ENTREGA[st].label}`);
   },
@@ -1209,20 +1242,43 @@ const acoes = {
     if (!r) return;
     const c = D.cliente(s, r.clienteId);
     const ent = r.status === 'entregue';
-    modal({ title: `Corrigir remessa ${esc(r.protocolo || '')}`,
-      body: `<p class="small ink2" style="margin-top:0"><b>${esc(c?.nome || '—')}</b> · ${D.STATUS_ENTREGA[r.status].label} · ${plural(r.garrafas, 'garrafa')} · ${money(r.valor)}<br>${r.itens.map((i) => `${i.qtd}× ${esc(D.produto(s, i.produtoId)?.nome)}`).join(' · ')}</p>
+    const vd = r.tipo === 'venda';
+    const est = D.estoqueCentral(s);
+    const atual = Object.fromEntries(r.itens.map((i) => [i.produtoId, i]));
+    const lista = sortBy(s.produtos.filter((p) => p.ativo || atual[p.id]), (p) => (atual[p.id] ? 0 : 1));
+    const maxDe = (pid) => Math.max(0, (est[pid] || 0) + (atual[pid]?.qtd || 0));
+    const nome = vd ? `Venda direta · ${esc(r.comprador || 'sem comprador')}` : esc(c?.nome || '—');
+    modal({ title: `${ent ? 'Corrigir' : 'Editar'} ${vd ? 'venda' : 'remessa'} ${esc(r.protocolo || '')}`, wide: !ent,
+      body: `<p class="small ink2" style="margin-top:0"><b>${nome}</b> · ${D.STATUS_ENTREGA[r.status].label} · ${plural(r.garrafas, 'garrafa')} · ${money(r.valor)}<br>${r.itens.map((i) => `${i.qtd}× ${esc(D.produto(s, i.produtoId)?.nome)}`).join(' · ')}</p>
         <form id="fcanc" class="col">
-          <div class="card"><div class="label">Lançou para o parceiro errado?</div>
+          ${ent ? '' : `<div class="card"><div class="label">Editar ${vd ? 'a venda' : 'o pedido'}</div>
+            ${vd ? `<div class="grid g2 mt-s"><label class="field"><span>Comprador</span><input class="input" name="comprador" maxlength="120" value="${esc(r.comprador || '')}"></label>
+              <label class="field"><span>Forma de pagamento</span><select class="input" name="forma"><option value="">—</option>${D.FORMAS_PAGAMENTO.map((x) => `<option ${x === r.forma ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select></label></div>
+              <label class="field"><span>Contato / documento</span><input class="input" name="contato" maxlength="120" value="${esc(r.contato || '')}"></label>` : ''}
+            <div class="tiny muted mt-s">Ajuste as quantidades (zero tira o rótulo). O estoque reservado se ajusta sozinho.</div>
+            <div class="list mt-s" style="max-height:340px;overflow:auto">${lista.map((p) => `<div class="li li-mov">${thumb(p, 'sm')}<div class="grow"><div class="t">${esc(p.nome)}</div><div class="s">Disponível ${maxDe(p.id)}</div></div>
+              ${vd ? moneyInput('preco:' + p.id, atual[p.id]?.precoUnit ?? p.preco * 1.25, { width: 120, extra: 'title="Preço unitário"' }) : ''}${stepper('q:' + p.id, atual[p.id]?.qtd || 0, { max: maxDe(p.id) })}</div>`).join('')}</div>
+            <button type="button" class="btn mt-s" data-act="salvarEd">${icon('check')} Salvar alterações</button></div>`}
+          ${vd ? '' : `<div class="card"><div class="label">Lançou para o parceiro errado?</div>
             <label class="field mt-s"><span>Parceiro certo</span><select class="input" name="cliente"><option value="">Escolha…</option>${s.clientes.filter((x) => x.ativo && x.id !== r.clienteId).map((x) => `<option value="${x.id}">${esc(x.nome)}${x.cidade ? ' — ' + esc(x.cidade) : ''}</option>`).join('')}</select></label>
             <div class="tiny muted mt-s">A remessa passa para ele com o mesmo protocolo${ent ? ' e já como entregue: as garrafas saem do saldo de ' + esc(c?.nome || '') + ' e entram no do parceiro certo' : ''}.</div>
-            <button type="button" class="btn mt-s" data-act="trocar">${icon('swap')} Trocar parceiro</button></div>
-          <div class="card"><div class="label">Ou cancelar a remessa</div>
+            <button type="button" class="btn mt-s" data-act="trocar">${icon('swap')} Trocar parceiro</button></div>`}
+          <div class="card"><div class="label">Ou cancelar ${vd ? 'a venda' : 'a remessa'}</div>
             <div class="tiny muted mt-s">As garrafas <b>voltam para o estoque central</b> e a remessa sai do quadro${ent ? ` (e do saldo de ${esc(c?.nome || '')})` : ''}.</div>
             <label class="field mt-s"><span>Motivo (opcional)</span><input class="input" name="motivo" maxlength="200" placeholder="Ex.: parceiro desistiu / não coletou / lançada por engano"></label>
-            <button type="button" class="btn mt-s" style="background:var(--crit)" data-act="ok">${icon('x')} Cancelar remessa</button></div>
+            <button type="button" class="btn mt-s" style="background:var(--crit)" data-act="ok">${icon('x')} Cancelar ${vd ? 'venda' : 'remessa'}</button></div>
         </form>`,
       foot: '<button class="btn ghost" data-act="close">Voltar</button>',
       handlers: {
+        step: stepHandler, qty: () => {},
+        salvarEd: () => {
+          const fd = new FormData(document.getElementById('fcanc'));
+          const itens = lista.map((p) => ({ produtoId: p.id, qtd: Math.min(maxDe(p.id), +fd.get('q:' + p.id) || 0), precoUnit: vd ? parseMoney(fd.get('preco:' + p.id)) : undefined })).filter((i) => i.qtd > 0);
+          if (!itens.length) return toast('Deixe ao menos uma garrafa, ou use Cancelar');
+          const campos = vd ? Object.fromEntries(['comprador', 'forma', 'contato'].map((k) => [k, String(fd.get(k) || '').trim()])) : {};
+          store.commit((s2) => D.editarRemessa(s2, r.id, { itens, ...campos }), 'remessa');
+          closeModal(); toast(`${vd ? 'Venda' : 'Remessa'} atualizada: ${plural(sum(itens, (i) => i.qtd), 'garrafa')}`);
+        },
         trocar: () => {
           const novo = new FormData(document.getElementById('fcanc')).get('cliente');
           if (!novo) return toast('Escolha o parceiro certo');

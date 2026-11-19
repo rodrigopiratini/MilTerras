@@ -30,7 +30,10 @@ export const STATUS_ENTREGA = {
   em_rota: { label: 'Em rota', tone: 'info', prox: 'entregue', acao: 'Confirmar entrega' },
   entregue: { label: 'Entregue', tone: 'ok' },
 };
-const entregue = (mv) => mv.tipo !== 'remessa' || !mv.entrega || mv.entrega === 'entregue';
+// remessa e venda direta com controle de entrega só contam como entregues no fim da esteira
+const entregue = (mv) => !mv.entrega || mv.entrega === 'entregue';
+// venda direta pela esteira (tem remessaId) × venda direta antiga / de balcão (já entregue e paga no lançamento)
+const vdEsteira = (m) => m.tipo === 'venda_direta' && !!m.remessaId;
 
 export const FORMAS_PAGAMENTO = ['PIX', 'Boleto', 'Transferência', 'Cartão de crédito', 'Dinheiro'];
 
@@ -99,11 +102,16 @@ export function addMov(s, mv) {
 export function remessas(s) {
   const g = {};
   for (const m of s.movs) {
-    if (m.tipo !== 'remessa' || !m.remessaId) continue;
-    const r = (g[m.remessaId] ||= { id: m.remessaId, protocolo: m.protocolo || '', clienteId: m.clienteId, data: m.data, status: m.entrega || 'entregue', itens: [], ref: m.ref, obs: m.obs, hist: m.entregaHist || [], entregueEm: m.entregueEm, recebidoPor: m.recebidoPor });
-    r.itens.push({ produtoId: m.produtoId, qtd: m.qtd, movId: m.id });
+    if ((m.tipo !== 'remessa' && m.tipo !== 'venda_direta') || !m.remessaId) continue;
+    const r = (g[m.remessaId] ||= { id: m.remessaId, tipo: m.tipo === 'venda_direta' ? 'venda' : 'remessa', protocolo: m.protocolo || '', clienteId: m.clienteId, data: m.data, status: m.entrega || 'entregue', itens: [], ref: m.ref, obs: m.obs, hist: m.entregaHist || [], entregueEm: m.entregueEm, recebidoPor: m.recebidoPor,
+      comprador: m.comprador, forma: m.forma, contato: m.contato, vencimento: m.vencimento, pagamentos: m.pagamentos || [] });
+    r.itens.push({ produtoId: m.produtoId, qtd: m.qtd, movId: m.id, precoUnit: m.precoUnit });
   }
-  return Object.values(g).map((r) => ({ ...r, garrafas: sum(r.itens, (i) => i.qtd), valor: valorItens(s, r.itens, r.clienteId) })).sort((a, b) => (a.data + a.id < b.data + b.id ? 1 : -1));
+  return Object.values(g).map((r) => {
+    const valor = r.tipo === 'venda' ? sum(r.itens, (i) => i.qtd * (i.precoUnit || 0)) : valorItens(s, r.itens, r.clienteId);
+    const rec = sum(r.pagamentos, (p) => p.valor);
+    return { ...r, garrafas: sum(r.itens, (i) => i.qtd), valor, recebido: rec, saldo: r.tipo === 'venda' ? Math.max(0, Math.round((valor - rec) * 100) / 100) : 0 };
+  }).sort((a, b) => (a.data + a.id < b.data + b.id ? 1 : -1));
 }
 
 // Protocolo sequencial por ano: REM-2026-0001 (gerado pela Gestão, que enxerga todas as remessas)
@@ -126,18 +134,68 @@ export function avancarRemessa(s, remessaId, status, { recebidoPor, data = today
     if (m.remessaId !== remessaId) continue;
     m.entrega = status;
     m.entregaHist = [...(m.entregaHist || []), { status, em: new Date().toISOString() }];
-    if (status === 'entregue') { m.entregueEm = data; if (recebidoPor) m.recebidoPor = recebidoPor; }
+    if (status === 'entregue') { m.entregueEm = data; if (recebidoPor) m.recebidoPor = recebidoPor; if (m.tipo === 'venda_direta') m.vencimento ||= data; }
   }
 }
 
 // Cancela uma remessa ainda não entregue (ou entregue sem nada vendido) (o parceiro desistiu ou não coletou): as garrafas voltam
 // para o estoque central e a remessa some do quadro. O pedido / fechamento de origem guarda o registro.
+// ---------- Venda direta pela esteira ----------
+// Reserva as garrafas no estoque central ao lançar; ao ser entregue vira receita e conta a receber
+// (vencimento = data da entrega, ou a informada). "Já entregue e pago" registra tudo de uma vez.
+export function criarVendaDireta(s, { itens, status = 'a_separar', data = today(), comprador = '', forma = '', contato = '', obs = '', vencimento = '', pago = false }) {
+  const remessaId = uid('vd');
+  const protocolo = proximoProtocolo(s, data.slice(0, 4));
+  const hist = [{ status, em: new Date().toISOString() }];
+  const total = sum(itens, (i) => i.qtd * i.precoUnit);
+  const pagamentos = status === 'entregue' && pago ? [{ data, forma: forma || 'PIX', valor: Math.round(total * 100) / 100, parcelas: 1 }] : [];
+  for (const { produtoId, qtd, precoUnit } of itens) if (qtd > 0) addMov(s, { data, tipo: 'venda_direta', produtoId, qtd, precoUnit, remessaId, protocolo, entrega: status, entregaHist: hist,
+    ...(comprador ? { comprador } : {}), ...(forma ? { forma } : {}), ...(contato ? { contato } : {}), ...(obs ? { obs } : {}),
+    ...(vencimento ? { vencimento } : {}), ...(status === 'entregue' ? { entregueEm: data, vencimento: vencimento || data } : {}), pagamentos });
+  return remessaId;
+}
+export const vendasDiretas = (s) => remessas(s).filter((r) => r.tipo === 'venda');
+// Contas a receber das vendas diretas já entregues
+export function vendasAReceber(s) {
+  const t = today();
+  return vendasDiretas(s).filter((r) => r.status === 'entregue' && r.saldo > 0)
+    .map((r) => ({ ...r, atraso: Math.max(0, diffDays(t, r.vencimento || r.entregueEm || r.data)) }))
+    .sort((a, b) => ((a.vencimento || '') < (b.vencimento || '') ? -1 : 1));
+}
+export function registrarPagamentoVenda(s, remessaId, { data = today(), partes } = {}) {
+  const r = vendasDiretas(s).find((x) => x.id === remessaId);
+  if (!r) return;
+  partes ||= [{ forma: r.forma || 'PIX', valor: r.saldo, parcelas: 1 }];
+  const pagamentos = [...r.pagamentos, ...partes.filter((p) => p.valor > 0).map((p) => ({ data, forma: p.forma, valor: p.valor, parcelas: +p.parcelas || 1 }))];
+  for (const m of s.movs) if (m.remessaId === remessaId) m.pagamentos = pagamentos;
+}
+// Recebimentos (caixa) das vendas diretas: antigas/de balcão entram na data do lançamento
+function recebimentosVendas(s) {
+  const out = [];
+  for (const m of s.movs) if (m.tipo === 'venda_direta' && !m.remessaId) out.push({ data: m.data, valor: m.qtd * (m.precoUnit || 0), forma: m.forma || '', descricao: `Venda direta${m.comprador ? ' · ' + m.comprador : ''} · ${m.qtd}× ${produto(s, m.produtoId)?.nome}` });
+  for (const r of vendasDiretas(s)) for (const p of r.pagamentos) out.push({ data: p.data, valor: p.valor, forma: p.forma + (p.parcelas > 1 ? ` em ${p.parcelas}x` : ''), descricao: `Venda direta ${r.protocolo}${r.comprador ? ' · ' + r.comprador : ''}` });
+  return out;
+}
+
+// Edita uma remessa / venda direta ainda não entregue: troca rótulos, quantidades e (venda) comprador, preços, forma
+export function editarRemessa(s, remessaId, { itens, ...campos }) {
+  const ms = s.movs.filter((m) => m.remessaId === remessaId);
+  if (!ms.length || ms[0].entrega === 'entregue') return null;
+  const base = { ...ms[0] };
+  for (const k of ['id', 'produtoId', 'qtd', 'precoUnit']) delete base[k];
+  for (const [k, v] of Object.entries(campos)) if (v === '' || v == null) delete base[k]; else base[k] = v;
+  s.movs = s.movs.filter((m) => m.remessaId !== remessaId);
+  for (const i of itens) if (i.qtd > 0) addMov(s, { ...base, produtoId: i.produtoId, qtd: i.qtd, ...(base.tipo === 'venda_direta' ? { precoUnit: i.precoUnit } : {}) });
+  return remessaId;
+}
+
 // Remessa entregue pode ser desfeita enquanto nada dela foi vendido, acertado ou devolvido e não há
 // fechamento do parceiro depois da entrega. Devolve o motivo do bloqueio (ou '' se pode).
 export function bloqueioRemessa(s, remessaId) {
   const r = remessas(s).find((x) => x.id === remessaId);
   if (!r) return 'Remessa não encontrada';
   if (r.status !== 'entregue') return '';
+  if (r.tipo === 'venda') return r.recebido > 0 ? 'Venda já tem pagamento registrado' : '';
   const l = lotes(s, r.clienteId).find((x) => x.id === remessaId);
   if (l && Object.values(l.itens).some((x) => x.vendido || x.baixa || x.acertado)) return 'Já há venda, acerto ou devolução contada desta remessa';
   if (s.fechamentos.some((f) => f.clienteId === r.clienteId && f.fim >= (r.entregueEm || r.data))) return 'O parceiro já tem fechamento depois desta entrega';
@@ -148,7 +206,7 @@ export function bloqueioRemessa(s, remessaId) {
 
 // Remessa lançada para o parceiro errado: passa para o parceiro certo (mesmo protocolo, mesma etapa)
 export function trocarParceiroRemessa(s, remessaId, clienteId) {
-  if (bloqueioRemessa(s, remessaId)) return null;
+  if (bloqueioRemessa(s, remessaId) || remessas(s).find((x) => x.id === remessaId)?.tipo === 'venda') return null;
   const antigo = remessas(s).find((x) => x.id === remessaId)?.clienteId;
   for (const m of s.movs) if (m.remessaId === remessaId) { m.clienteId = clienteId; m.obs = [m.obs, 'parceiro corrigido'].filter(Boolean).join(' · '); }
   return antigo;
@@ -183,7 +241,7 @@ export function migrarProtocolos(s) {
   }
   // protocolo repetido (duas remessas criadas em aparelhos desatualizados): a mais nova ganha número novo
   const porProt = {};
-  for (const m of s.movs) if (m.tipo === 'remessa' && m.remessaId && m.protocolo) ((porProt[m.protocolo] ||= {})[m.remessaId] ||= m.ts || 0);
+  for (const m of s.movs) if ((m.tipo === 'remessa' || m.tipo === 'venda_direta') && m.remessaId && m.protocolo) ((porProt[m.protocolo] ||= {})[m.remessaId] ||= m.ts || 0);
   for (const [prot, ids] of Object.entries(porProt)) {
     const rids = Object.keys(ids).sort((a, b) => ids[a] - ids[b]);
     for (const rid of rids.slice(1)) {
@@ -577,8 +635,8 @@ export function custoMedio(s, pid) {
 
 // Receita reconhecida = vendas apuradas nos fechamentos (consumo) + vendas diretas
 export function vendasRealizadas(s) {
-  return s.movs.filter((m) => m.tipo === 'consumo' || m.tipo === 'venda_direta')
-    .map((m) => ({ ...m, receita: m.qtd * (m.precoUnit || 0), cmv: m.qtd * custoMedio(s, m.produtoId) }));
+  return s.movs.filter((m) => m.tipo === 'consumo' || (m.tipo === 'venda_direta' && entregue(m)))
+    .map((m) => ({ ...m, data: vdEsteira(m) ? m.entregueEm || m.data : m.data, receita: m.qtd * (m.precoUnit || 0), cmv: m.qtd * custoMedio(s, m.produtoId) }));
 }
 
 export function serieMensal(s, meses = 6) {
@@ -595,7 +653,7 @@ export function serieMensal(s, meses = 6) {
   }
   for (const d of s.despesas) { const b = base[monthKey(d.data)]; if (b && d.categoria !== 'Compra de mercadoria') b.despesas += d.valor; }
   for (const f of s.fechamentos) for (const p of recebimentosDe(f)) { if (p.data <= t) { const b = base[monthKey(p.data)]; if (b) b.recebido += p.valor; } }
-  for (const m of s.movs) if (m.tipo === 'venda_direta') { const b = base[monthKey(m.data)]; if (b) b.recebido += m.qtd * m.precoUnit; }
+  for (const p of recebimentosVendas(s)) { if (p.data <= t) { const b = base[monthKey(p.data)]; if (b) b.recebido += p.valor; } }
   return keys.map((k) => ({ ...base[k], lucro: base[k].receita - base[k].cmv - base[k].despesas }));
 }
 
@@ -605,7 +663,7 @@ export function balancoMes(s, mes) {
   const despesas = s.despesas.filter((d) => d.data.startsWith(mes));
   const recebimentos = [
     ...s.fechamentos.flatMap((f) => recebimentosDe(f).filter((p) => (p.data || '').startsWith(mes)).map((p) => ({ data: p.data, descricao: `Fechamento ${cliente(s, f.clienteId)?.nome || ''}`, forma: p.forma + (p.parcelas > 1 ? ` em ${p.parcelas}x` : ''), valor: p.valor, link: `#/fechamento/${f.id}` }))),
-    ...s.movs.filter((m) => m.tipo === 'venda_direta' && m.data.startsWith(mes)).map((m) => ({ data: m.data, descricao: `Venda direta${m.comprador ? ' · ' + m.comprador : ''} · ${m.qtd}× ${produto(s, m.produtoId)?.nome}`, forma: m.forma || '', valor: m.qtd * (m.precoUnit || 0) })),
+    ...recebimentosVendas(s).filter((p) => p.data.startsWith(mes)).map((p) => ({ ...p, link: '#/remessas' })),
   ].sort((a, b) => (a.data < b.data ? -1 : 1));
   const receita = sum(vendas, (v) => v.receita), cmv = sum(vendas, (v) => v.cmv);
   const compras = sum(despesas.filter((d) => d.categoria === 'Compra de mercadoria'), (d) => d.valor);
@@ -645,7 +703,7 @@ export function resumoRede(s, de, ate = today()) {
 export function giroDiario(s, janela = 60) {
   const desde = addDays(today(), -janela);
   const m = Object.fromEntries(s.produtos.map((p) => [p.id, 0]));
-  for (const mv of s.movs) if ((mv.tipo === 'consumo' || mv.tipo === 'venda_direta') && mv.data > desde) m[mv.produtoId] += mv.qtd / janela;
+  for (const mv of s.movs) if ((mv.tipo === 'consumo' || (mv.tipo === 'venda_direta' && entregue(mv))) && mv.data > desde) m[mv.produtoId] += mv.qtd / janela;
   return m;
 }
 
